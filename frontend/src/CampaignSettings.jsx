@@ -175,7 +175,7 @@ export default function CampaignSettings({ campaign }) {
       {/* Follow-up Variation Selection Mode */}
       <Section title="Follow-up Variation Selection Mode">
         <div className="card card-p" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <p className="fs-sm text-secondary">Choose how PlusVibe assigns variation paths for steps after Step 1.</p>
+          <p className="fs-sm text-secondary">Choose how MailSender assigns variation paths for steps after Step 1.</p>
           {[
             { val: 'roundrobin', label: 'Round Robin', desc: 'Each step independently rotates through variations for even distribution across all leads. This introduces more randomness and has less risk of getting flagged by email providers.' },
             { val: 'match', label: 'Match Initial Variation', desc: 'Lead stays on the same variation path. Example: 1A → 2A → 3A' },

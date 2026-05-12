@@ -55,7 +55,7 @@ export default function CampaignDetail({ campaign, onBack, onToggleStatus }) {
         Home › Campaigns › <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{campaign.name}</span>
       </div>
 
-      {/* Campaign Tab Bar (PlusVibe style top nav) */}
+      {/* Campaign Tab Bar (MailSender style top nav) */}
       <div className="card" style={{ padding: '0 1rem', display: 'flex', alignItems: 'center', gap: 0, marginBottom: '1.5rem', overflow: 'hidden', flexShrink: 0 }}>
         {/* Campaign Name + Toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', paddingRight: '1.5rem', borderRight: '1px solid var(--border-color)', marginRight: '0.5rem' }}>

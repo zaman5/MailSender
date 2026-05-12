@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export default function Settings() {
-  const [profileForm, setProfileForm] = useState({ name: 'Zaman Khan', email: 'zaman@plusvibe.io', company: 'PlusVibe Inc.', timezone: 'Asia/Karachi' });
+  const [profileForm, setProfileForm] = useState({ name: 'Zaman Khan', email: 'zaman@mailsender.io', company: 'MailSender Inc.', timezone: 'Asia/Karachi' });
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
   const [savedMsg, setSavedMsg] = useState('');
   const [tab, setTab] = useState('profile');

@@ -12,7 +12,7 @@ app.use(express.json());
 
 // Basic health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'PlusVibe API is running' });
+  res.json({ status: 'ok', message: 'MailSender API is running' });
 });
 
 // Future routes will be mounted here

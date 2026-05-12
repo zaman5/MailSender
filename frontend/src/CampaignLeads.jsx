@@ -14,7 +14,7 @@ const SAMPLE_LEADS = [
   { initials: 'ZM', color: '#f59e0b', name: 'Zaman Muhammad', email: '2019f-mulbscs-132@mul.edu.pk', esp: 'Google', sent: 1, opened: 0, clicked: 0, replied: 0, status: 'Completed', step: '1/1', label: null },
   { initials: 'MZ', color: '#ec4899', name: 'Muhammad Zaman', email: 'zamantech5@gmail.com', esp: 'Google', sent: 1, opened: 0, clicked: 0, replied: 0, status: 'Completed', step: '1/1', label: null },
   { initials: 'N', color: '#8b5cf6', name: 'Naina', email: 'gnaineg8@gmail.com', esp: 'Google', sent: 1, opened: 0, clicked: 0, replied: 1, status: 'Replied', step: '1/1', label: null },
-  { initials: 'TH', color: '#06b6d4', name: 'Taimur H', email: 'taimur.h@dakia.ai', esp: 'Microsoft', sent: 1, opened: 0, clicked: 0, replied: 0, status: 'Completed', step: '1/1', label: null },
+  { initials: 'TH', color: '#06b6d4', name: 'Taimur H', email: 'taimur.h@hddp.ai', esp: 'Microsoft', sent: 1, opened: 0, clicked: 0, replied: 0, status: 'Completed', step: '1/1', label: null },
   { initials: 'MA', color: '#10b981', name: 'Mehdi A', email: 'mehdi@startup.io', esp: 'Google', sent: 1, opened: 1, clicked: 1, replied: 0, status: 'In Progress', step: '1/2', label: null },
   { initials: 'SR', color: '#ef4444', name: 'Sarah R', email: 'sarah@bigcorp.com', esp: 'Google', sent: 1, opened: 0, clicked: 0, replied: 0, status: 'Bounced', step: '1/1', label: null },
 ];

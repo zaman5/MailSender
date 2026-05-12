@@ -4,6 +4,7 @@ import Dashboard from './Dashboard';
 import Campaigns from './Campaigns';
 import Prospects from './Prospects';
 import Inbox from './Inbox';
+import Accounts from './Accounts';
 import Warmup from './Warmup';
 import Settings from './Settings';
 
@@ -12,6 +13,7 @@ const NAV = [
   { key: 'campaigns', label: 'Campaigns', icon: '📢', badge: '12' },
   { key: 'prospects', label: 'Prospects', icon: '👥', badge: null },
   { key: 'inbox', label: 'Unified Inbox', icon: '💬', badge: '3', badgeCls: 'green' },
+  { key: 'accounts', label: 'Email Accounts', icon: '📧', badge: null },
   { key: 'warmup', label: 'Email Warmup', icon: '🔥', badge: null },
 ];
 
@@ -24,6 +26,7 @@ const PAGE_TITLES = {
   campaigns: 'Campaigns',
   prospects: 'Prospects',
   inbox: 'Unified Inbox',
+  accounts: 'Email Accounts',
   warmup: 'Email Warmup',
   settings: 'Settings',
 };
@@ -39,7 +42,7 @@ function NavItem({ item, active, onClick }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState('accounts');
   const [notifOpen, setNotifOpen] = useState(false);
 
   return (
@@ -47,8 +50,8 @@ export default function App() {
       {/* ===== SIDEBAR ===== */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-icon">P</div>
-          <div className="logo-text">Plus<span>Vibe</span></div>
+          <div className="logo-icon">M</div>
+          <div className="logo-text">Mail<span>Sender</span></div>
         </div>
 
         <div className="sidebar-section">
@@ -137,6 +140,7 @@ export default function App() {
           {tab === 'campaigns' && <Campaigns />}
           {tab === 'prospects' && <Prospects />}
           {tab === 'inbox' && <Inbox />}
+          {tab === 'accounts' && <Accounts />}
           {tab === 'warmup' && <Warmup />}
           {tab === 'settings' && <Settings />}
         </div>
