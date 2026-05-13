@@ -55,7 +55,42 @@ export default function Accounts() {
   const fileInputRef = useRef(null);
   const [csvFile, setCsvFile] = useState(null);
   const [csvImporting, setCsvImporting] = useState(false);
-  const [csvResult, setCsvResult] = useState(null); // { added: 0, failed: 0 }
+  const [csvResult, setCsvResult] = useState(null);
+  const [csvProvider, setCsvProvider] = useState('Google');
+
+  // Send Email modal
+  const [sendModal, setSendModal] = useState(null); // account object
+  const [sendForm, setSendForm] = useState({ to: '', subject: '', body: '' });
+  const [sending, setSending] = useState(false);
+  const [sendDone, setSendDone] = useState(false);
+
+  // Email Tester modal
+  const [testerModal, setTesterModal] = useState(null); // account object
+  const [testerEmail, setTesterEmail] = useState('');
+  const [testerRunning, setTesterRunning] = useState(false);
+  const [testerResult, setTesterResult] = useState(null);
+
+  // Email Tracking modal
+  const [trackingModal, setTrackingModal] = useState(null); // account object
+
+  // Mock sent-email tracking log keyed by account email
+  const [trackingLog, setTrackingLog] = useState({
+    'sarah@hddp.live': [
+      { id: 1, to: 'client1@acmecorp.com', subject: 'Q2 Outreach', sentAt: '2026-05-12 09:14', type: 'Cold', delivered: true, opened: true, openedAt: '2026-05-12 09:52', clicked: true, bounced: false },
+      { id: 2, to: 'ceo@startupx.io', subject: 'Partnership Proposal', sentAt: '2026-05-12 11:30', type: 'Follow-up', delivered: true, opened: false, openedAt: null, clicked: false, bounced: false },
+      { id: 3, to: 'ops@retailbig.com', subject: 'Intro Email', sentAt: '2026-05-13 08:05', type: 'Cold', delivered: false, opened: false, openedAt: null, clicked: false, bounced: true },
+    ],
+    'a.hayes@hddpcrm.website': [
+      { id: 4, to: 'hr@techfirm.com', subject: 'SaaS Demo Invite', sentAt: '2026-05-11 14:20', type: 'Cold', delivered: true, opened: true, openedAt: '2026-05-11 15:01', clicked: false, bounced: false },
+      { id: 5, to: 'sales@agency.co', subject: 'Follow-up #2', sentAt: '2026-05-13 10:00', type: 'Follow-up', delivered: true, opened: true, openedAt: '2026-05-13 10:45', clicked: true, bounced: false },
+    ],
+  });
+
+  // Leads state
+  const [leadsModal, setLeadsModal] = useState(false);
+  const [leads, setLeads] = useState([]);
+  const [leadForm, setLeadForm] = useState({ name: '', email: '', company: '', phone: '' });
+  const [leadErrors, setLeadErrors] = useState({});
 
   const [toast, setToast] = useState('');
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -135,11 +170,42 @@ export default function Accounts() {
     if (formErrors[key]) setFormErrors(p => { const n = { ...p }; delete n[key]; return n; });
   }
 
+  // ---- SEND EMAIL LOGIC ----
+  function openSendModal(account) {
+    setSendForm({ to: account.email, subject: '', body: '' });
+    setSendDone(false);
+    setSendModal(account);
+  }
+  function handleSend() {
+    if (!sendForm.subject.trim() || !sendForm.body.trim()) return;
+    setSending(true);
+    setTimeout(() => { setSending(false); setSendDone(true); showToast(`Email sent to ${sendForm.to}`); }, 1800);
+  }
+
+  // ---- LEADS LOGIC ----
+  function validateLead() {
+    const errs = {};
+    if (!leadForm.name.trim()) errs.name = 'Name required';
+    if (!EMAIL_RE.test(leadForm.email)) errs.email = 'Valid email required';
+    else if (leads.some(l => l.email.toLowerCase() === leadForm.email.toLowerCase())) errs.email = 'Already in list';
+    setLeadErrors(errs);
+    return Object.keys(errs).length === 0;
+  }
+  function addLead() {
+    if (!validateLead()) return;
+    setLeads(prev => [...prev, { ...leadForm, id: Date.now() }]);
+    setLeadForm({ name: '', email: '', company: '', phone: '' });
+    setLeadErrors({});
+    showToast('Lead added');
+  }
+  function removeLead(id) { setLeads(prev => prev.filter(l => l.id !== id)); }
+
   // ---- CSV IMPORT LOGIC ----
   function openCsvModal() {
     setCsvFile(null);
     setCsvResult(null);
     setCsvImporting(false);
+    setCsvProvider('Google');
     setCsvModal(true);
   }
 
@@ -155,20 +221,18 @@ export default function Accounts() {
   function processCsv() {
     if (!csvFile) return;
     setCsvImporting(true);
-    
-    // Simulate parsing and connection testing
     setTimeout(() => {
-      // Mock result
-      const newAccs = [
-        { email: `bulk1_${Math.floor(Math.random()*100)}@hddp.live`, esp: 'Google', status: 'active', sent: 0, limit: 100, warmup: 0, bounce: '0%', reply: '0%', campaigns: 0, spf: true, dkim: true, dmarc: true, mx: true },
-        { email: `bulk2_${Math.floor(Math.random()*100)}@hddpcrm.website`, esp: 'Microsoft', status: 'active', sent: 0, limit: 100, warmup: 0, bounce: '0%', reply: '0%', campaigns: 0, spf: true, dkim: true, dmarc: false, mx: true },
-        { email: `bulk3_${Math.floor(Math.random()*100)}@hddp.shop`, esp: 'Google', status: 'active', sent: 0, limit: 100, warmup: 0, bounce: '0%', reply: '0%', campaigns: 0, spf: true, dkim: true, dmarc: true, mx: true }
-      ];
-      
+      const n = Math.floor(Math.random()*3)+2;
+      const newAccs = Array.from({ length: n }, (_, i) => ({
+        email: `bulk${i+1}_${Math.floor(Math.random()*100)}@import.io`,
+        esp: csvProvider, status: 'active', sent: 0, limit: 100, warmup: 0,
+        bounce: '0%', reply: '0%', campaigns: 0,
+        spf: true, dkim: true, dmarc: csvProvider !== 'Other', mx: true
+      }));
       setAccounts(prev => [...prev, ...newAccs]);
-      setCsvResult({ added: 3, failed: 0 });
+      setCsvResult({ added: n, failed: 0 });
       setCsvImporting(false);
-      showToast(`Successfully imported 3 accounts`);
+      showToast(`Successfully imported ${n} accounts via ${csvProvider}`);
     }, 2500);
   }
 
@@ -190,6 +254,9 @@ export default function Accounts() {
       <div className="flex-between">
         <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Email Accounts</h2>
         <div className="flex-row">
+          <button className="btn btn-ghost" onClick={() => setLeadsModal(true)} style={{ gap: '0.4rem' }}>
+            👥 Leads List
+          </button>
           <button className="btn btn-secondary" onClick={openCsvModal}>
             <span style={{ fontSize: '1.1rem' }}>📄</span> Bulk Import (CSV)
           </button>
@@ -279,10 +346,17 @@ export default function Accounts() {
                     <button onClick={e => { e.stopPropagation(); setActionsOpen(actionsOpen === i ? null : i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem' }}>⋯</button>
                   </div>
                   {actionsOpen === i && (
-                    <div style={{ position: 'absolute', right: 0, top: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow-md)', zIndex: 50, minWidth: 150, overflow: 'hidden' }}>
-                      <button onClick={() => { setAccounts(prev => prev.filter((_,xi) => xi!==i)); showToast('Account removed'); setActionsOpen(null); }} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '0.6rem 1rem', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.8rem' }}
-                        onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.05)'}
-                        onMouseLeave={e => e.currentTarget.style.background='none'}>🗑 Remove</button>
+                    <div style={{ position: 'absolute', right: 0, top: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow-md)', zIndex: 50, minWidth: 185, overflow: 'hidden' }}>
+                      {[{ icon: '✉️', label: 'Send Email', action: () => { openSendModal(a); setActionsOpen(null); }, color: 'var(--text-primary)' },
+                        { icon: '🧪', label: 'Test Email', action: () => { setTesterEmail(''); setTesterResult(null); setTesterRunning(false); setTesterModal(a); setActionsOpen(null); }, color: 'var(--text-primary)' },
+                        { icon: '📊', label: 'View Tracking', action: () => { setTrackingModal(a); setActionsOpen(null); }, color: 'var(--text-primary)' },
+                        { icon: '🗑', label: 'Remove', action: () => { setAccounts(prev => prev.filter((_,xi) => xi!==i)); showToast('Account removed'); setActionsOpen(null); }, color: 'var(--danger)' }
+                      ].map(item => (
+                        <button key={item.label} onClick={item.action}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '0.6rem 1rem', color: item.color, cursor: 'pointer', fontSize: '0.8rem' }}
+                          onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.05)'}
+                          onMouseLeave={e => e.currentTarget.style.background='none'}>{item.icon} {item.label}</button>
+                      ))}
                     </div>
                   )}
                 </td>
@@ -415,6 +489,294 @@ export default function Accounts() {
         </div>
       )}
 
+      {/* ===================== EMAIL TESTER MODAL ===================== */}
+      {testerModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:120 }} onClick={() => setTesterModal(null)}>
+          <div className="card card-p" style={{ width:520 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
+              <div>
+                <h3 style={{ fontWeight:700, fontSize:'1.05rem' }}>🧪 Email Deliverability Test</h3>
+                <div style={{ fontSize:'0.78rem', color:'var(--text-muted)', marginTop:'0.2rem' }}>Test how your emails land — inbox, spam score, open tracking</div>
+              </div>
+              <button onClick={() => setTesterModal(null)} style={{ background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+            </div>
+
+            <div style={{ background:'rgba(99,102,241,0.07)', borderRadius:8, padding:'0.6rem 0.9rem', marginBottom:'1rem', fontSize:'0.82rem', color:'var(--text-secondary)' }}>
+              Sending from: <strong style={{ color:'var(--text-primary)' }}>{testerModal.email}</strong> &nbsp;·&nbsp; Provider: <strong>{testerModal.esp}</strong>
+            </div>
+
+            {!testerResult ? (
+              <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Send Test Email To <span style={{ color:'var(--danger)' }}>*</span></label>
+                  <input className="form-input" placeholder="your-inbox@gmail.com" value={testerEmail} onChange={e => setTesterEmail(e.target.value)} />
+                  <div style={{ fontSize:'0.73rem', color:'var(--text-muted)', marginTop:'0.3rem' }}>We'll send a test email and analyse spam score, placement & headers.</div>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0.65rem' }}>
+                  {[{ icon:'📩', label:'Cold Email', desc:'Outreach template' },{ icon:'🔁', label:'Follow-up', desc:'Reply-style' },{ icon:'📢', label:'Newsletter', desc:'Broadcast style' }].map(t => (
+                    <div key={t.label} style={{ border:'1px solid var(--border-color)', borderRadius:8, padding:'0.65rem 0.5rem', textAlign:'center', background:'var(--bg-tertiary)', fontSize:'0.78rem' }}>
+                      <div style={{ fontSize:'1.3rem', marginBottom:'0.3rem' }}>{t.icon}</div>
+                      <div style={{ fontWeight:600, fontSize:'0.78rem' }}>{t.label}</div>
+                      <div style={{ fontSize:'0.7rem', color:'var(--text-muted)' }}>{t.desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex-row" style={{ justifyContent:'flex-end', gap:'0.75rem' }}>
+                  <button className="btn btn-ghost" onClick={() => setTesterModal(null)}>Cancel</button>
+                  <button className="btn btn-primary" disabled={testerRunning || !testerEmail.trim()} onClick={() => {
+                    setTesterRunning(true);
+                    setTimeout(() => {
+                      const spamScore = (Math.random() * 3).toFixed(1);
+                      const placement = spamScore < 1.5 ? 'Inbox' : spamScore < 2.5 ? 'Promotions' : 'Spam';
+                      setTesterResult({
+                        spamScore, placement,
+                        delivered: true,
+                        spf: testerModal.spf, dkim: testerModal.dkim, dmarc: testerModal.dmarc,
+                        openTracking: true,
+                        clickTracking: true,
+                        replyTo: testerModal.email,
+                        headers: ['Message-ID: OK', 'X-Mailer: MailSender v2', 'Content-Type: text/html'],
+                        types: [{ name:'Cold Email', inbox: spamScore<2?'✅ Inbox':'⚠️ Promotions', score: spamScore },
+                                { name:'Follow-up',  inbox: spamScore<2.5?'✅ Inbox':'🚫 Spam', score: (spamScore*0.8).toFixed(1) },
+                                { name:'Newsletter', inbox: spamScore<1?'✅ Inbox':'⚠️ Promotions', score: (parseFloat(spamScore)+0.8).toFixed(1) }],
+                      });
+                      setTesterRunning(false);
+                      // Also add to tracking log
+                      setTrackingLog(prev => ({ ...prev, [testerModal.email]: [...(prev[testerModal.email]||[]), { id: Date.now(), to: testerEmail, subject: '[Test Email]', sentAt: new Date().toLocaleString('en-GB',{hour12:false}).slice(0,16).replace('T',' '), type: 'Test', delivered: true, opened: false, openedAt: null, clicked: false, bounced: false }] }));
+                    }, 2200);
+                  }}>{testerRunning ? 'Running test…' : '🧪 Run Deliverability Test'}</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:'1.1rem' }}>
+                {/* Score banner */}
+                <div style={{ display:'flex', gap:'1rem', alignItems:'center', background: testerResult.spamScore < 1.5 ? 'rgba(16,185,129,0.1)' : testerResult.spamScore < 2.5 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${testerResult.spamScore < 1.5 ? '#10b981' : testerResult.spamScore < 2.5 ? '#f59e0b' : '#ef4444'}40`, borderRadius:10, padding:'0.9rem 1.1rem' }}>
+                  <div style={{ fontSize:'2.5rem' }}>{testerResult.spamScore < 1.5 ? '✅' : testerResult.spamScore < 2.5 ? '⚠️' : '🚫'}</div>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:'1rem' }}>Spam Score: {testerResult.spamScore} / 5.0</div>
+                    <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)' }}>Placement: <strong>{testerResult.placement}</strong> &nbsp;·&nbsp; Delivered: <strong style={{ color:'#10b981' }}>Yes</strong></div>
+                  </div>
+                </div>
+                {/* Email type breakdown */}
+                <div>
+                  <div style={{ fontSize:'0.8rem', fontWeight:600, color:'var(--text-secondary)', marginBottom:'0.5rem' }}>📬 Placement by Email Type</div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                    {testerResult.types.map(t => (
+                      <div key={t.name} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.5rem 0.75rem', background:'var(--bg-tertiary)', borderRadius:7, fontSize:'0.82rem' }}>
+                        <span style={{ fontWeight:500 }}>{t.name}</span>
+                        <span>{t.inbox}</span>
+                        <span style={{ color:'var(--text-muted)' }}>Score: {t.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Auth checks */}
+                <div>
+                  <div style={{ fontSize:'0.8rem', fontWeight:600, color:'var(--text-secondary)', marginBottom:'0.5rem' }}>🔐 Authentication</div>
+                  <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap' }}>
+                    {[['SPF', testerResult.spf],['DKIM', testerResult.dkim],['DMARC', testerResult.dmarc],['Open Tracking', testerResult.openTracking],['Click Tracking', testerResult.clickTracking]].map(([lbl, ok]) => (
+                      <span key={lbl} style={{ fontSize:'0.73rem', fontWeight:700, padding:'3px 8px', borderRadius:5, background: ok?'#10b98120':'#ef444420', color: ok?'#10b981':'#ef4444', border:`1px solid ${ok?'#10b98140':'#ef444440'}` }}>{ok?'✓':'✗'} {lbl}</span>
+                    ))}
+                  </div>
+                </div>
+                {/* Headers */}
+                <div style={{ background:'var(--bg-tertiary)', borderRadius:8, padding:'0.6rem 0.8rem' }}>
+                  <div style={{ fontSize:'0.75rem', fontWeight:600, color:'var(--text-muted)', marginBottom:'0.4rem' }}>📋 Email Headers</div>
+                  {testerResult.headers.map((h,i) => <div key={i} style={{ fontSize:'0.73rem', fontFamily:'monospace', color:'var(--text-secondary)', lineHeight:1.6 }}>{h}</div>)}
+                </div>
+                <div className="flex-row" style={{ justifyContent:'flex-end', gap:'0.75rem' }}>
+                  <button className="btn btn-ghost" onClick={() => { setTesterResult(null); setTesterEmail(''); }}>← Re-test</button>
+                  <button className="btn btn-primary" onClick={() => setTesterModal(null)}>Done</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== EMAIL TRACKING MODAL ===================== */}
+      {trackingModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:120 }} onClick={() => setTrackingModal(null)}>
+          <div className="card card-p" style={{ width:700, maxHeight:'88vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
+              <div>
+                <h3 style={{ fontWeight:700, fontSize:'1.05rem' }}>📊 Email Tracking — {trackingModal.email}</h3>
+                <div style={{ fontSize:'0.78rem', color:'var(--text-muted)', marginTop:'0.2rem' }}>Delivery status, open tracking & click analytics per email sent</div>
+              </div>
+              <button onClick={() => setTrackingModal(null)} style={{ background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+            </div>
+            {/* Summary stats */}
+            {(() => {
+              const log = trackingLog[trackingModal.email] || [];
+              const delivered = log.filter(l => l.delivered).length;
+              const opened = log.filter(l => l.opened).length;
+              const clicked = log.filter(l => l.clicked).length;
+              const bounced = log.filter(l => l.bounced).length;
+              return (
+                <>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'0.75rem', marginBottom:'1.25rem' }}>
+                    {[{ label:'Delivered', val: delivered, color:'#10b981', icon:'✅' },
+                      { label:'Opened', val: opened, color:'#6366f1', icon:'👁️' },
+                      { label:'Clicked', val: clicked, color:'#f59e0b', icon:'🖱️' },
+                      { label:'Bounced', val: bounced, color:'#ef4444', icon:'⛔' }
+                    ].map(s => (
+                      <div key={s.label} style={{ background:'var(--bg-tertiary)', borderRadius:10, padding:'0.75rem', textAlign:'center', border:`1px solid ${s.color}30` }}>
+                        <div style={{ fontSize:'1.3rem' }}>{s.icon}</div>
+                        <div style={{ fontSize:'1.4rem', fontWeight:700, color:s.color }}>{s.val}</div>
+                        <div style={{ fontSize:'0.73rem', color:'var(--text-muted)' }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {log.length === 0 ? (
+                    <div style={{ textAlign:'center', padding:'2rem', color:'var(--text-muted)', fontSize:'0.875rem' }}>No emails sent yet from this account.</div>
+                  ) : (
+                    <div className="card" style={{ overflow:'hidden' }}>
+                      <table className="data-table">
+                        <thead><tr>
+                          <th>To</th><th>Subject</th><th>Type</th><th>Sent At</th>
+                          <th>Delivered</th><th>Opened</th><th>Clicked</th>
+                        </tr></thead>
+                        <tbody>
+                          {log.map(l => (
+                            <tr key={l.id}>
+                              <td style={{ fontSize:'0.8rem' }}>{l.to}</td>
+                              <td style={{ fontSize:'0.8rem', maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.subject}</td>
+                              <td><span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 7px', borderRadius:4, background: l.type==='Cold'?'rgba(99,102,241,0.15)':l.type==='Follow-up'?'rgba(245,158,11,0.15)':l.type==='Test'?'rgba(16,185,129,0.15)':'rgba(255,255,255,0.08)', color: l.type==='Cold'?'#6366f1':l.type==='Follow-up'?'#f59e0b':l.type==='Test'?'#10b981':'var(--text-secondary)' }}>{l.type}</span></td>
+                              <td style={{ fontSize:'0.78rem', color:'var(--text-muted)' }}>{l.sentAt}</td>
+                              <td style={{ textAlign:'center' }}>{l.bounced ? <span style={{ color:'#ef4444', fontSize:'0.8rem' }}>⛔ Bounced</span> : l.delivered ? <span style={{ color:'#10b981', fontSize:'0.85rem' }}>✅</span> : <span style={{ color:'#f59e0b' }}>⏳</span>}</td>
+                              <td style={{ textAlign:'center' }}>
+                                {l.opened
+                                  ? <span style={{ fontSize:'0.75rem', color:'#6366f1' }}>👁️ {l.openedAt?.slice(11)}</span>
+                                  : <span style={{ color:'var(--text-muted)', fontSize:'0.8rem' }}>—</span>}
+                              </td>
+                              <td style={{ textAlign:'center' }}>{l.clicked ? <span style={{ color:'#f59e0b', fontSize:'0.85rem' }}>🖱️</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'1rem' }}>
+                    <button className="btn btn-ghost" onClick={() => setTrackingModal(null)}>Close</button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== SEND EMAIL MODAL ===================== */}
+      {sendModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:110 }} onClick={() => { setSendModal(null); setSendDone(false); }}>
+          <div className="card card-p" style={{ width:480 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
+              <h3 style={{ fontWeight:700, fontSize:'1.05rem' }}>✉️ Send Email</h3>
+              <button onClick={() => { setSendModal(null); setSendDone(false); }} style={{ background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+            </div>
+            {!sendDone ? (
+              <div style={{ display:'flex', flexDirection:'column', gap:'0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">From Account</label>
+                  <div style={{ padding:'0.5rem 0.75rem', background:'var(--bg-tertiary)', borderRadius:8, fontSize:'0.85rem', color:'var(--text-secondary)' }}>{sendModal.email}</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">To <span style={{ color:'var(--danger)' }}>*</span></label>
+                  <input className="form-input" value={sendForm.to} onChange={e => setSendForm(p=>({...p,to:e.target.value}))} placeholder="recipient@example.com" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Subject <span style={{ color:'var(--danger)' }}>*</span></label>
+                  <input className="form-input" value={sendForm.subject} onChange={e => setSendForm(p=>({...p,subject:e.target.value}))} placeholder="Email subject…" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Body <span style={{ color:'var(--danger)' }}>*</span></label>
+                  <textarea className="form-input" rows={5} value={sendForm.body} onChange={e => setSendForm(p=>({...p,body:e.target.value}))} placeholder="Write your email here…" style={{ resize:'vertical' }} />
+                </div>
+                <div className="flex-row" style={{ justifyContent:'flex-end', gap:'0.75rem' }}>
+                  <button className="btn btn-ghost" onClick={() => setSendModal(null)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleSend} disabled={sending || !sendForm.subject.trim() || !sendForm.body.trim()}>
+                    {sending ? 'Sending…' : '✉️ Send Email'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign:'center', padding:'2rem 1rem' }}>
+                <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>✅</div>
+                <div style={{ fontWeight:700, fontSize:'1.1rem', marginBottom:'0.5rem' }}>Email Sent!</div>
+                <div style={{ fontSize:'0.85rem', color:'var(--text-secondary)', marginBottom:'1.5rem' }}>Your email was sent from <strong>{sendModal.email}</strong> to <strong>{sendForm.to}</strong>.</div>
+                <button className="btn btn-primary" onClick={() => { setSendModal(null); setSendDone(false); }}>Close</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== LEADS LIST MODAL ===================== */}
+      {leadsModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:110 }} onClick={() => setLeadsModal(false)}>
+          <div className="card card-p" style={{ width:620, maxHeight:'88vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:'1.25rem' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div>
+                <h3 style={{ fontWeight:700, fontSize:'1.1rem' }}>👥 Leads List</h3>
+                <div style={{ fontSize:'0.78rem', color:'var(--text-muted)' }}>Add leads one by one to build your outreach list</div>
+              </div>
+              <button onClick={() => setLeadsModal(false)} style={{ background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+            </div>
+            {/* Add lead form */}
+            <div style={{ background:'var(--bg-tertiary)', borderRadius:10, padding:'1rem', display:'flex', flexDirection:'column', gap:'0.75rem' }}>
+              <div style={{ fontWeight:600, fontSize:'0.85rem', color:'var(--text-secondary)' }}>➕ Add New Lead</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.65rem' }}>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize:'0.78rem' }}>Full Name *</label>
+                  <input className="form-input" placeholder="John Doe" value={leadForm.name} onChange={e => { setLeadForm(p=>({...p,name:e.target.value})); if(leadErrors.name) setLeadErrors(p=>{const n={...p};delete n.name;return n;}); }} style={leadErrors.name?{borderColor:'var(--danger)'}:{}} />
+                  {leadErrors.name && <div style={{ color:'var(--danger)', fontSize:'0.72rem', marginTop:'0.2rem' }}>⚠ {leadErrors.name}</div>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize:'0.78rem' }}>Email *</label>
+                  <input className="form-input" placeholder="lead@company.com" value={leadForm.email} onChange={e => { setLeadForm(p=>({...p,email:e.target.value})); if(leadErrors.email) setLeadErrors(p=>{const n={...p};delete n.email;return n;}); }} style={leadErrors.email?{borderColor:'var(--danger)'}:{}} />
+                  {leadErrors.email && <div style={{ color:'var(--danger)', fontSize:'0.72rem', marginTop:'0.2rem' }}>⚠ {leadErrors.email}</div>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize:'0.78rem' }}>Company</label>
+                  <input className="form-input" placeholder="Acme Corp" value={leadForm.company} onChange={e => setLeadForm(p=>({...p,company:e.target.value}))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize:'0.78rem' }}>Phone</label>
+                  <input className="form-input" placeholder="+1 555 000 0000" value={leadForm.phone} onChange={e => setLeadForm(p=>({...p,phone:e.target.value}))} />
+                </div>
+              </div>
+              <button className="btn btn-primary" style={{ alignSelf:'flex-end' }} onClick={addLead}>+ Add Lead</button>
+            </div>
+            {/* Leads table */}
+            {leads.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'2rem', color:'var(--text-muted)', fontSize:'0.875rem' }}>No leads yet. Add your first lead above.</div>
+            ) : (
+              <div className="card" style={{ overflow:'hidden' }}>
+                <table className="data-table">
+                  <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Company</th><th>Phone</th><th></th></tr></thead>
+                  <tbody>
+                    {leads.map((l, i) => (
+                      <tr key={l.id}>
+                        <td style={{ color:'var(--text-muted)', fontSize:'0.78rem' }}>{i+1}</td>
+                        <td style={{ fontWeight:500, fontSize:'0.875rem' }}>{l.name}</td>
+                        <td style={{ fontSize:'0.85rem', color:'var(--text-secondary)' }}>{l.email}</td>
+                        <td style={{ fontSize:'0.8rem' }}>{l.company || '—'}</td>
+                        <td style={{ fontSize:'0.8rem' }}>{l.phone || '—'}</td>
+                        <td><button onClick={() => removeLead(l.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--danger)', fontSize:'0.9rem' }}>🗑</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:'0.8rem', color:'var(--text-muted)' }}>{leads.length} lead{leads.length !== 1 ? 's' : ''} in list</span>
+              <button className="btn btn-ghost" onClick={() => setLeadsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===================== BULK IMPORT CSV MODAL ===================== */}
       {csvModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setCsvModal(false)}>
@@ -429,6 +791,18 @@ export default function Accounts() {
 
             {!csvResult ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* Provider selection for bulk import */}
+                <div className="form-group">
+                  <label className="form-label">Email Provider (for all imported accounts)</label>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'0.5rem' }}>
+                    {['Google','Microsoft','SMTP','Other'].map(p => (
+                      <button key={p} onClick={() => setCsvProvider(p)}
+                        style={{ padding:'0.55rem 0.25rem', borderRadius:8, border:`2px solid ${csvProvider===p?'var(--accent-primary)':'var(--border-color)'}`, background:csvProvider===p?'rgba(99,102,241,0.12)':'var(--bg-tertiary)', color:csvProvider===p?'var(--accent-primary)':'var(--text-secondary)', cursor:'pointer', fontSize:'0.8rem', fontWeight:600 }}>
+                        {p==='Google'?'🔵 ':p==='Microsoft'?'🟧 ':p==='SMTP'?'⚙️ ':'📧 '}{p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--border-color)', borderRadius: '12px', padding: '2rem', textAlign: 'center' }}>
                   <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>📄</div>
                   <h4 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Upload your CSV file</h4>
