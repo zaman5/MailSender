@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
+import { useAuth } from './AuthContext';
+import { api } from './api';
 
 export default function Settings() {
-  const [profileForm, setProfileForm] = useState({ name: 'Zaman Khan', email: 'zaman@mailsender.io', company: 'MailSender Inc.', timezone: 'Asia/Karachi' });
+  const { user, login, token } = useAuth();
+  const [profileForm, setProfileForm] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    company: user?.company || 'MailSender Inc.',
+    timezone: user?.timezone || 'Asia/Karachi',
+  });
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
   const [savedMsg, setSavedMsg] = useState('');
   const [tab, setTab] = useState('profile');
@@ -14,9 +22,7 @@ export default function Settings() {
   const [inviteModal, setInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [team, setTeam] = useState([
-    { name: 'Zaman Khan', email: 'zaman@plusvibe.io', role: 'Owner', status: 'active' },
-    { name: 'Ali Hassan', email: 'ali@plusvibe.io', role: 'Admin', status: 'active' },
-    { name: 'Sara Ahmed', email: 'sara@plusvibe.io', role: 'Member', status: 'invited' },
+    { name: user?.name || 'Owner', email: user?.email || '', role: 'Owner', status: 'active' },
   ]);
   const [selectedPlan, setSelectedPlan] = useState('Growth');
   const [toast, setToast] = useState('');
@@ -28,18 +34,32 @@ export default function Settings() {
     setTimeout(() => setToast(''), 2500);
   }
 
-  function saveProfile() {
-    setSavedMsg('✅ Saved!');
-    showToast('Profile saved successfully');
-    setTimeout(() => setSavedMsg(''), 2500);
+  async function saveProfile() {
+    const res = await api.patch('/auth/profile', { 
+      name: profileForm.name,
+      email: profileForm.email 
+    });
+    if (res && !res.error) {
+      login({ ...user, name: res.user.name, email: res.user.email }, token);
+      setSavedMsg('✅ Saved!');
+      showToast('Profile saved successfully');
+      setTimeout(() => setSavedMsg(''), 2500);
+    } else {
+      showToast(res?.error || 'Failed to save');
+    }
   }
 
-  function updatePassword() {
+  async function updatePassword() {
     if (!passwords.current) { showToast('Enter current password'); return; }
     if (passwords.next !== passwords.confirm) { showToast('New passwords do not match'); return; }
     if (passwords.next.length < 6) { showToast('Password must be at least 6 characters'); return; }
-    setPasswords({ current: '', next: '', confirm: '' });
-    showToast('Password updated successfully');
+    const res = await api.patch('/auth/password', { current: passwords.current, next: passwords.next });
+    if (res && !res.error) {
+      setPasswords({ current: '', next: '', confirm: '' });
+      showToast('Password updated successfully');
+    } else {
+      showToast(res?.error || 'Incorrect current password');
+    }
   }
 
   function copyApiKey() {

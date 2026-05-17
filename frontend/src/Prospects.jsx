@@ -1,397 +1,893 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
+import { api } from './api';
+import ImportLeads from './ImportLeads';
 
-const SAMPLE_LISTS = [
-  { id: 1, name: 'List - 260317092915', count: 13, created: '2026-03-17', leads: [] },
-  { id: 2, name: 'SaaS Founders Q2', count: 220, created: '2026-04-01', leads: [] },
-  { id: 3, name: 'Agency Decision Makers', count: 512, created: '2026-04-18', leads: [] },
-];
-
-const RESOURCES = [
-  { icon: '🎓', title: 'Cold Outreach Academy', desc: 'Learn effective outreach strategies' },
-  { icon: '📋', title: '30+ List Building Strategies', desc: 'Grow your prospect database' },
-  { icon: '👤', title: 'Ideal Customer Profile', desc: 'Swipe file templates' },
-  { icon: '✉️', title: 'Email Templates Library', desc: '100+ proven email templates' },
-];
-
-/** Parse a CSV string into an array of objects keyed by header row */
+/** Proper RFC-4180 CSV parser — handles quoted fields with commas/newlines inside */
 function parseCsv(text) {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/['"]/g, ''));
-  return lines.slice(1).map(line => {
-    // Handle quoted fields that might contain commas
-    const values = [];
-    let cur = '', inQ = false;
-    for (const ch of line) {
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { values.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
+  const raw = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!raw) return [];
+  const records = [];
+  let record = [], field = '', inQ = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i], next = raw[i + 1];
+    if (inQ) {
+      if (ch === '"' && next === '"') { field += '"'; i++; }
+      else if (ch === '"') { inQ = false; }
+      else { field += ch; }
+    } else {
+      if (ch === '"') { inQ = true; }
+      else if (ch === ',') { record.push(field.trim()); field = ''; }
+      else if (ch === '\n') {
+        record.push(field.trim()); field = '';
+        if (record.some(v => v !== '')) records.push(record);
+        record = [];
+      } else { field += ch; }
     }
-    values.push(cur.trim());
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = (values[i] || '').replace(/^"|"$/g, '').trim(); });
-    return obj;
-  }).filter(row => row.email || row.email_address);
+  }
+  record.push(field.trim());
+  if (record.some(v => v !== '')) records.push(record);
+  if (records.length < 2) return [];
+  const headers = records[0].map(h => h.replace(/^"|"$/g, '').trim().toLowerCase().replace(/[\s]+/g, '_'));
+  return records.slice(1)
+    .filter(row => row.some(v => v))
+    .map(vals => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/^"|"$/g, '').trim(); });
+      return obj;
+    })
+    .filter(row => row.email || row.email_address);
 }
 
-/** Derive a display name from a lead row */
+/** Parse Excel ArrayBuffer via SheetJS CDN (window.XLSX loaded in index.html) */
+function parseExcel(buffer) {
+  if (!window.XLSX) throw new Error('SheetJS not loaded yet — please retry in a moment');
+  const wb = window.XLSX.read(new Uint8Array(buffer), { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const jsonRows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (jsonRows.length < 2) return [];
+  const headers = jsonRows[0].map(h => String(h).trim().toLowerCase().replace(/[\s]+/g, '_'));
+  return jsonRows.slice(1)
+    .filter(row => row.some(c => String(c).trim()))
+    .map(vals => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = String(vals[i] ?? '').trim(); });
+      return obj;
+    })
+    .filter(row => row.email || row.email_address);
+}
+
 function getLeadName(lead) {
   const first = lead.first_name || lead.firstname || '';
-  const last = lead.last_name || lead.lastname || '';
+  const last  = lead.last_name  || lead.lastname  || '';
   if (first || last) return `${first} ${last}`.trim();
-  // Fallback: try to extract from email  e.g. john.doe@example.com → John Doe
-  const emailLocal = (lead.email || lead.email_address || '').split('@')[0];
-  if (emailLocal) {
-    return emailLocal.replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  }
-  return '—';
+  const emailLocal = (lead.email || '').split('@')[0];
+  return emailLocal ? emailLocal.replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—';
 }
 
 export default function Prospects() {
-  const [lists, setLists] = useState(SAMPLE_LISTS);
+  const [lists, setLists]               = useState([]);
+  const [loading, setLoading]           = useState(true);
   const [selectedList, setSelectedList] = useState(null);
-  const [searchList, setSearchList] = useState('');;
-  const [searchLeads, setSearchLeads] = useState('');
+  const [searchList, setSearchList]     = useState('');
+  const [searchLeads, setSearchLeads]   = useState('');
   const [listActionsOpen, setListActionsOpen] = useState(null);
-  const [createModal, setCreateModal] = useState(false);
-  const [newListName, setNewListName] = useState('');
-  const [importModal, setImportModal] = useState(false);
-  const [pasteEmails, setPasteEmails] = useState('');
-  const [toast, setToast] = useState('');
-  const [importError, setImportError] = useState('');
+  const [createModal, setCreateModal]   = useState(false);
+  const [newListName, setNewListName]   = useState('');
+  const [importModal, setImportModal]   = useState(false);
+  const [pasteEmails, setPasteEmails]   = useState('');
+  const [toast, setToast]               = useState('');
+  const [importError, setImportError]   = useState('');
+  const [saving, setSaving]             = useState(false);
   const fileInputRef = useRef(null);
+  const [addLeadModal, setAddLeadModal] = useState(false);
+  const EMPTY_LEAD = { firstName:'', lastName:'', email:'', company:'', jobTitle:'', phone:'', city:'' };
+  const [addLeadForm, setAddLeadForm]   = useState(EMPTY_LEAD);
+  const [addLeadErr, setAddLeadErr]     = useState('');
+  const [addCustomFields, setAddCustomFields] = useState([]); // [{key:'',value:''}]
+  const [addingKey, setAddingKey]       = useState(false);
+  const [newKey, setNewKey]             = useState('');
+  const [colPickerOpen, setColPickerOpen] = useState(false);
+  // { id, list, top, right } — fixed-position list actions menu
+  const [listMenu, setListMenu]         = useState(null);
 
-  function showToast(msg) { setToast(msg); setTimeout(() => setToast(''), 2200); }
+  // All available columns
+  const ALL_COLS = [
+    { key: 'name',       label: 'Full Name',   always: true, w: 180 },
+    { key: 'first_name', label: 'First Name',               w: 130 },
+    { key: 'last_name',  label: 'Last Name',                w: 130 },
+    { key: 'email',      label: 'Email',       always: true, w: 230 },
+    { key: 'company',    label: 'Company',                  w: 160 },
+    { key: 'title',      label: 'Job Title',                w: 160 },
+    { key: 'phone',      label: 'Phone',                    w: 140 },
+    { key: 'city',       label: 'City',                     w: 110 },
+    { key: 'state',      label: 'State',                    w: 100 },
+    { key: 'country',    label: 'Country',                  w: 110 },
+    { key: 'linkedin',   label: 'LinkedIn',                 w: 180 },
+    { key: 'created_at', label: 'Added',                    w: 110 },
+    { key: '_actions',   label: '',            always: true, w: 72  }, // edit/delete
+  ];
+  const [visibleCols, setVisibleCols] = useState(
+    ALL_COLS.map(c => c.key)
+  );
+  const toggleCol = (key) => setVisibleCols(prev =>
+    prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+  );
+  const activeCols = ALL_COLS.filter(c => visibleCols.includes(c.key));
 
-  function createList() {
-    if (!newListName.trim()) return;
-    const nl = { id: Date.now(), name: newListName.trim(), count: 0, created: new Date().toISOString().split('T')[0], leads: [] };
-    setLists(prev => [...prev, nl]);
-    setSelectedList(nl);
-    setNewListName('');
-    setCreateModal(false);
-    showToast(`List "${nl.name}" created`);
+  // Edit / delete single lead state
+  const EMPTY_EDIT = { first_name:'', last_name:'', email:'', company:'', title:'', phone:'', city:'', state:'', country:'', linkedin_url:'' };
+  const [editModal, setEditModal]   = useState(false);
+  const [editLead, setEditLead]     = useState(null);   // the lead being edited
+  const [editForm, setEditForm]     = useState(EMPTY_EDIT);
+  const [editErr, setEditErr]       = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEdit(lead) {
+    setEditLead(lead);
+    setEditForm({
+      first_name:   lead.first_name   || '',
+      last_name:    lead.last_name    || '',
+      email:        lead.email        || '',
+      company:      lead.company      || '',
+      title:        lead.title        || '',
+      phone:        lead.phone        || '',
+      city:         lead.city         || '',
+      state:        lead.state        || '',
+      country:      lead.country      || '',
+      linkedin_url: lead.linkedin_url || '',
+    });
+    setEditErr('');
+    setEditModal(true);
   }
 
-  function deleteList(id) {
+  async function saveEdit() {
+    if (!editForm.email.includes('@')) { setEditErr('Valid email required'); return; }
+    setEditSaving(true);
+    const res = await api.patch(`/leads/${selectedList.id}/lead/${editLead.id}`, editForm);
+    setEditSaving(false);
+    if (res && !res.error) {
+      setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
+      setSelectedList(res);
+      setEditModal(false);
+      showToast('Lead updated');
+    } else {
+      setEditErr(res?.error || 'Failed to update lead');
+    }
+  }
+
+  async function deleteLead(lead) {
+    if (!window.confirm(`Delete ${lead.email}?`)) return;
+    const res = await api.delete(`/leads/${selectedList.id}/lead/${lead.id}`);
+    if (res && !res.error) {
+      setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
+      setSelectedList(res);
+      showToast('Lead deleted');
+    }
+  }
+
+  const COLORS = ['#6366f1','#10b981','#f59e0b','#ec4899','#8b5cf6','#06b6d4','#ef4444','#f97316'];
+  function initials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(' ');
+    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+  }
+
+  // ── Load all lists from API on mount ──────────────────────
+  useEffect(() => {
+    api.get('/leads').then(res => {
+      if (res && !res.error) setLists(res);
+      setLoading(false);
+    });
+  }, []);
+
+  function showToast(msg) { setToast(msg); setTimeout(() => setToast(''), 2400); }
+
+  // ── Create new list ───────────────────────────────────────
+  async function createList() {
+    if (!newListName.trim()) return;
+    setSaving(true);
+    const res = await api.post('/leads', { name: newListName.trim() });
+    setSaving(false);
+    if (res && !res.error) {
+      setLists(prev => [...prev, res]);
+      setSelectedList(res);
+      setNewListName('');
+      setCreateModal(false);
+      showToast(`List "${res.name}" created`);
+    } else {
+      showToast(res?.error || 'Failed to create list');
+    }
+  }
+
+  // ── Delete list ───────────────────────────────────────────
+  async function deleteList(id) {
+    await api.delete(`/leads/${id}`);
     setLists(prev => prev.filter(l => l.id !== id));
     if (selectedList?.id === id) setSelectedList(null);
     showToast('List deleted');
   }
 
-  /** Handle CSV file upload — parses real data */
-  function handleCsvFile(file) {
-    if (!file || !file.name.endsWith('.csv')) {
-      setImportError('Please upload a valid .csv file');
-      return;
+  // ── Download list as CSV ──────────────────────────────
+  function downloadList(list) {
+    const leads = list.leads || [];
+    const cols    = ['name','first_name','last_name','email','company','title','phone','city','state','country','linkedin_url','created_at'];
+    const headers = ['Full Name','First Name','Last Name','Email','Company','Job Title','Phone','City','State','Country','LinkedIn URL','Added'];
+    const escape  = (v) => `"${String(v||'').replace(/"/g,'""')}"`;
+    const rows = [
+      headers.join(','),
+      ...leads.map(l => cols.map(c => escape(l[c])).join(',')),
+    ];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${list.name.replace(/[^a-z0-9]/gi,'_')}_leads.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Import leads (CSV or paste) ───────────────────────────
+  async function importLeads(rawLeads) {
+    if (!selectedList) return;
+    if (!rawLeads.length) { setImportError('No valid emails found.'); return; }
+
+    setSaving(true);
+    const res = await api.post(`/leads/${selectedList.id}/import`, { leads: rawLeads });
+    setSaving(false);
+
+    if (res && !res.error) {
+      // Update the list in state with fresh data
+      setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
+      setSelectedList(res);
+      setPasteEmails('');
+      setImportModal(false);
+      showToast(`${rawLeads.length} leads imported successfully`);
+    } else {
+      setImportError(res?.error || 'Failed to import leads');
     }
+  }
+
+  // ── Handle CSV or Excel file upload ─────────────────────
+  function handleFile(file) {
+    if (!file) return;
     setImportError('');
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const leads = parseCsv(e.target.result);
+    const isExcel = /\.(xlsx|xls|xlsm|ods)$/i.test(file.name);
+
+    function processRows(parsed) {
+      const leads = parsed.map(row => ({
+        email:   (row.email || row.email_address || '').toLowerCase().trim(),
+        name:    getLeadName(row),
+        company: row.company || row.company_name || row.organization || '',
+        phone:   row.phone   || row.phone_number || row.mobile || '',
+      })).filter(r => r.email.includes('@'));
+
       if (leads.length === 0) {
-        setImportError('No valid rows found. Make sure your CSV has an "email" column.');
+        setImportError('No valid emails found. Make sure your file has an "email" column.');
         return;
       }
-      setLists(prev => prev.map(l => {
-        if (l.id === selectedList?.id) {
-          const merged = [...l.leads, ...leads];
-          return { ...l, leads: merged, count: merged.length };
-        }
-        return l;
-      }));
-      // update selectedList reference
-      setSelectedList(prev => {
-        if (!prev) return prev;
-        const merged = [...(prev.leads || []), ...leads];
-        return { ...prev, leads: merged, count: merged.length };
-      });
-      setImportModal(false);
-      showToast(`${leads.length} leads imported successfully`);
-    };
-    reader.readAsText(file);
+      importLeads(leads);
+    }
+
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try   { processRows(parseExcel(e.target.result)); }
+        catch (err) { setImportError('Excel parse error: ' + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = e => processRows(parseCsv(e.target.result));
+      reader.readAsText(file, 'UTF-8');
+    }
   }
 
-  /** Handle paste-emails import */
-  function importPasted() {
-    const newLeads = pasteEmails
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => l.includes('@'))
-      .map(email => ({ email }));
-    if (newLeads.length === 0) { showToast('No valid emails found'); return; }
-    setLists(prev => prev.map(l => {
-      if (l.id === selectedList?.id) {
-        const merged = [...l.leads, ...newLeads];
-        return { ...l, leads: merged, count: merged.length };
-      }
-      return l;
-    }));
-    setSelectedList(prev => {
-      if (!prev) return prev;
-      const merged = [...(prev.leads || []), ...newLeads];
-      return { ...prev, leads: merged, count: merged.length };
+  // ── Add single lead manually ──────────────────────────────────
+  async function handleAddSingleLead() {
+    setAddLeadErr('');
+    const { firstName, lastName, email, company, jobTitle, phone, city } = addLeadForm;
+    if (!email.trim() || !email.includes('@')) { setAddLeadErr('Valid email required'); return; }
+    if (!selectedList) return;
+    const name = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
+    const cf = {};
+    addCustomFields.forEach(f => { if (f.key) cf[f.key] = f.value; });
+    setSaving(true);
+    const res = await api.post(`/leads/${selectedList.id}/import`, {
+      leads: [{ email: email.trim(), name, company, title: jobTitle, phone, city, customFields: cf }],
     });
-    setImportModal(false);
-    setPasteEmails('');
-    showToast(`${newLeads.length} leads imported`);
+    setSaving(false);
+    if (res && !res.error) {
+      setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
+      setSelectedList(res);
+      setAddLeadModal(false);
+      setAddLeadForm(EMPTY_LEAD);
+      setAddCustomFields([]);
+      setAddingKey(false); setNewKey('');
+      showToast('Lead added successfully');
+    } else {
+      setAddLeadErr(res?.error || 'Failed to add lead');
+    }
   }
 
-  const filteredLists = lists.filter(l => l.name.toLowerCase().includes(searchList.toLowerCase()));
+  // ── Handle paste emails ───────────────────────────────────
+  async function handlePasteImport() {
+    setImportError('');
+    const emails = pasteEmails.split(/[\n,;]+/).map(e => e.trim()).filter(e => e.includes('@'));
+    if (!emails.length) { setImportError('No valid emails found.'); return; }
+    const leads = emails.map(email => ({ email, name: '', company: '', phone: '' }));
+    await importLeads(leads);
+  }
 
-  // Current list's leads (sync from lists array for display)
-  const currentListLeads = lists.find(l => l.id === selectedList?.id)?.leads || [];
-  const filteredLeads = currentListLeads.filter(lead => {
+  // ── Computed values ───────────────────────────────────────
+  const filteredLists = lists.filter(l => l.name.toLowerCase().includes(searchList.toLowerCase()));
+  const activeLead  = selectedList ? lists.find(l => l.id === selectedList.id) || selectedList : null;
+  const filteredLeads = (activeLead?.leads || []).filter(lead => {
     const q = searchLeads.toLowerCase();
-    const name = getLeadName(lead).toLowerCase();
-    const email = (lead.email || lead.email_address || '').toLowerCase();
-    const company = (lead.company || lead.company_name || '').toLowerCase();
-    return name.includes(q) || email.includes(q) || company.includes(q);
+    return !q || (lead.email + lead.name + lead.company).toLowerCase().includes(q);
   });
 
   return (
-    <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 120px)', minHeight: 500, position: 'relative' }}>
-      {toast && <div style={{ position: 'fixed', bottom: 24, right: 24, background: '#10b981', color: '#fff', padding: '0.75rem 1.25rem', borderRadius: 10, fontWeight: 500, zIndex: 999, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', fontSize: '0.875rem' }}>✅ {toast}</div>}
-
-      {/* Left Sidebar */}
-      <div style={{ width: 220, flexShrink: 0, borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.01)' }}>
-        <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>My Lists</span>
-          <div className="flex-row" style={{ gap: '0.25rem' }}>
-            <button onClick={() => showToast('Grid view')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.9rem' }}>⊞</button>
-            <button onClick={() => setCreateModal(true)} style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 700 }}>+</button>
-          </div>
+    <div className="page-block fade-up" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: '#10b981', color: '#fff', padding: '0.75rem 1.25rem', borderRadius: 10, fontWeight: 500, zIndex: 999, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', fontSize: '0.875rem' }}>
+          ✅ {toast}
         </div>
+      )}
 
-        <div style={{ padding: '0.75rem' }}>
-          <div className="search-box" style={{ fontSize: '0.8rem' }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>🔍</span>
-            <input placeholder="Search lists" value={searchList} onChange={e => setSearchList(e.target.value)} style={{ fontSize: '0.8rem' }} />
-          </div>
+      {/* Header */}
+      <div className="flex-between" style={{ flexShrink: 0, paddingBottom: '0.75rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Leads</h2>
+          <p className="text-secondary fs-sm" style={{ marginTop: '0.25rem' }}>
+            {lists.length} list{lists.length !== 1 ? 's' : ''} · {lists.reduce((a, l) => a + (l.count || 0), 0).toLocaleString()} total leads
+          </p>
         </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0.5rem' }}>
-          {filteredLists.map(l => (
-            <div
-              key={l.id}
-              onClick={() => { setSelectedList(l); setSearchLeads(''); }}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 0.75rem', borderRadius: 8, cursor: 'pointer', background: selectedList?.id === l.id ? 'rgba(99,102,241,0.12)' : 'transparent', marginBottom: '0.2rem', transition: 'background 0.15s' }}
-              onMouseEnter={e => { if (selectedList?.id !== l.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-              onMouseLeave={e => { if (selectedList?.id !== l.id) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>≡</span>
-                <span style={{ fontSize: '0.8rem', fontWeight: selectedList?.id === l.id ? 600 : 400, color: selectedList?.id === l.id ? 'var(--accent-primary)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.name}</span>
-              </div>
-              <div style={{ position: 'relative' }}>
-                <button
-                  onClick={e => { e.stopPropagation(); setListActionsOpen(listActionsOpen === l.id ? null : l.id); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', padding: '0 2px' }}
-                >⋯</button>
-                {listActionsOpen === l.id && (
-                  <div style={{ position: 'absolute', right: 0, top: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 8, boxShadow: 'var(--shadow-md)', zIndex: 50, minWidth: 130, overflow: 'hidden' }}>
-                    {[['✏️ Rename', () => { const n = prompt('New name:', l.name); if (n) { setLists(prev => prev.map(x => x.id === l.id ? {...x, name: n} : x)); showToast('Renamed'); }}], ['🗑 Delete', () => deleteList(l.id)]].map(([label, fn]) => (
-                      <button key={label} onClick={() => { fn(); setListActionsOpen(null); }} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '0.5rem 0.75rem', color: label.includes('Delete') ? 'var(--danger)' : 'var(--text-primary)', cursor: 'pointer', fontSize: '0.78rem' }}>{label}</button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        <button className="btn btn-primary" onClick={() => setCreateModal(true)}>+ New List</button>
       </div>
 
-      {/* Main Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
-        {!selectedList ? (
-          <div>
-            {/* Action Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
-              {/* Import CSV */}
-              <div className="card card-p" style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', cursor: 'pointer', transition: 'transform 0.15s' }}
-                onClick={() => setImportModal(true)}
-                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-                <div style={{ flexShrink: 0 }}>
-                  <div style={{ width: 44, height: 44, background: 'rgba(99,102,241,0.12)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem' }}>📥</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-primary)' }}>Import CSV</div>
-                  <p className="fs-sm text-secondary">Import your list, edit it, and add enrichment, such as verifying emails and scraping website or LinkedIn data. Once your list is enriched and ready, you can launch a campaign.</p>
-                </div>
-                <div style={{ width: 100, height: 70, background: 'rgba(99,102,241,0.06)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', flexShrink: 0 }}>📊</div>
-              </div>
+      {/* Main layout: sidebar + detail — fills remaining height */}
+      <div style={{ display: 'flex', gap: '1.5rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
-              {/* Create Blank List */}
-              <div className="card card-p" style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', cursor: 'pointer', transition: 'transform 0.15s' }}
-                onClick={() => setCreateModal(true)}
-                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
-                <div style={{ flexShrink: 0 }}>
-                  <div style={{ width: 44, height: 44, background: 'rgba(16,185,129,0.12)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem' }}>📝</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.5rem', color: '#10b981' }}>Create Blank List</div>
-                  <p className="fs-sm text-secondary">Start with a blank list to add leads and begin your data enrichment process, such as verifying emails, scraping website or LinkedIn data, and using AI to generate personalized lines.</p>
-                </div>
-                <div style={{ width: 100, height: 70, background: 'rgba(16,185,129,0.06)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{['Name','Email','Company'].map(c => <div key={c} style={{ height: 8, width: 80, background: 'rgba(16,185,129,0.2)', borderRadius: 4 }} />)}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Spread the Word + Resources */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '1.5rem' }}>
-              <div className="card card-p">
-                <div style={{ fontWeight: 600, marginBottom: '1rem' }}>Spread the word about MailSender</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  {[['⭐', 'Write a review on G2 or publish a post about your experience on Twitter or LinkedIn to help us reach more people'], ['🎁', 'Send us a screenshot or a link to your review/post to support@mailsender.io and we will add a bonus of 1000 email credits']].map(([icon, text], i) => (
-                    <div key={i} style={{ background: i === 0 ? 'rgba(245,158,11,0.06)' : 'rgba(99,102,241,0.06)', border: `1px solid ${i === 0 ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)'}`, borderRadius: 10, padding: '1rem', textAlign: 'center' }}>
-                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{icon}</div>
-                      <p className="fs-sm text-secondary">{text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="card card-p">
-                <div style={{ fontWeight: 600, marginBottom: '1rem' }}>Resources</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {RESOURCES.map((r, i) => (
-                    <div key={i} onClick={() => showToast(`Opening: ${r.title}`)} style={{ display: 'flex', gap: '0.75rem', cursor: 'pointer', padding: '0.4rem', borderRadius: 6, transition: 'background 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.04)'}
-                      onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                      <span style={{ fontSize: '1.2rem' }}>{r.icon}</span>
-                      <div><div style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--accent-primary)' }}>{r.title}</div><div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{r.desc}</div></div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+        {/* Left: Lists sidebar — scrolls independently */}
+        <div style={{ width: 280, flexShrink: 0, height: '100%', overflowY: 'auto', paddingRight: '0.25rem' }}>
+          <div className="search-box" style={{ marginBottom: '0.75rem' }}>
+            <span className="text-muted">🔍</span>
+            <input placeholder="Search lists..." value={searchList} onChange={e => setSearchList(e.target.value)} />
           </div>
-        ) : (
-          /* Selected List View */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div className="flex-between">
-              <div>
-                <h3 style={{ fontWeight: 700, fontSize: '1.1rem' }}>{selectedList.name}</h3>
-                <div className="fs-sm text-secondary">{currentListLeads.length} leads · Created {selectedList.created}</div>
-              </div>
-              <div className="flex-row">
-                <button className="btn btn-secondary btn-sm" onClick={() => setImportModal(true)}>+ Add Leads</button>
-                <button className="btn btn-primary btn-sm" onClick={() => showToast('Launching campaign...')}>🚀 Launch Campaign</button>
-              </div>
-            </div>
 
-            {currentListLeads.length === 0 ? (
-              <div className="card card-p" style={{ textAlign: 'center', padding: '4rem' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📋</div>
-                <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>This list is empty</div>
-                <p className="fs-sm text-secondary" style={{ marginBottom: '1.25rem' }}>Import a CSV or add leads manually to get started.</p>
-                <button className="btn btn-primary btn-sm" onClick={() => setImportModal(true)}>+ Import Leads</button>
-              </div>
-            ) : (
-              <div className="card" style={{ overflow: 'hidden' }}>
-                {/* Search bar for leads */}
-                <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)' }}>
-                  <div className="search-box" style={{ width: 280 }}>
-                    <span style={{ color: 'var(--text-muted)' }}>🔍</span>
-                    <input placeholder="Search leads by name, email, company…" value={searchLeads} onChange={e => setSearchLeads(e.target.value)} />
+          {loading ? (
+            <div className="card card-p" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>
+          ) : filteredLists.length === 0 ? (
+            <div className="card card-p" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</div>
+              <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>No lists yet</div>
+              <div className="fs-sm text-secondary" style={{ marginBottom: '1rem' }}>Create your first lead list</div>
+              <button className="btn btn-primary btn-sm" onClick={() => setCreateModal(true)}>+ Create List</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {filteredLists.map(list => (
+                <div
+                  key={list.id}
+                  className="card card-p"
+                  style={{
+                    cursor: 'pointer', padding: '0.75rem 1rem', position: 'relative',
+                    border: activeLead?.id === list.id ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                    background: activeLead?.id === list.id ? 'rgba(99,102,241,0.08)' : 'var(--bg-secondary)',
+                  }}
+                  onClick={() => { setSelectedList(list); setListMenu(null); }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem', flex: 1, marginRight: '0.5rem' }}>{list.name}</div>
+                    <button
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', padding: '2px 6px', borderRadius: 4 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (listMenu?.id === list.id) { setListMenu(null); return; }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        // position dropdown left-aligned to button right edge, below button
+                        setListMenu({ id: list.id, list, top: rect.bottom + 6, left: Math.min(rect.right - 168, window.innerWidth - 178) });
+                      }}
+                    >⋮</button>
                   </div>
+                  {/* column count badge on card */}
+                  <div className="fs-xs text-muted" style={{ marginTop: '0.25rem', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <span>{(list.count || 0).toLocaleString()} leads · {list.created_at?.slice(0, 10)}</span>
+                    <span style={{ background:'rgba(99,102,241,0.15)', color:'var(--accent-primary)', borderRadius:99, padding:'1px 7px', fontSize:'0.65rem', fontWeight:700 }}>{activeCols.filter(c=>c.key!=='_actions').length} cols</span>
+                  </div>
+
                 </div>
-                <table className="data-table">
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Fixed-position list actions dropdown — portalled to body to escape transform stacking context */}
+        {listMenu && ReactDOM.createPortal(
+          <>
+            <div style={{ position:'fixed', inset:0, zIndex:9998 }} onClick={() => setListMenu(null)} />
+            <div style={{
+              position:'fixed',
+              top:  listMenu.top,
+              left: listMenu.left,
+              background:'var(--bg-tertiary)',
+              border:'1px solid var(--border-color)',
+              borderRadius:10, zIndex:9999, minWidth:170,
+              boxShadow:'0 8px 28px rgba(0,0,0,0.55)',
+              overflow:'hidden',
+            }}>
+              <button
+                style={{ display:'flex', alignItems:'center', gap:'0.5rem', width:'100%', padding:'0.65rem 1rem', background:'none', border:'none', color:'var(--text-primary)', cursor:'pointer', fontSize:'0.875rem' }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.07)'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                onClick={() => { downloadList(listMenu.list); setListMenu(null); }}
+              >⬇ Download CSV</button>
+              <div style={{ height:1, background:'var(--border-color)' }} />
+              <button
+                style={{ display:'flex', alignItems:'center', gap:'0.5rem', width:'100%', padding:'0.65rem 1rem', background:'none', border:'none', color:'var(--danger)', cursor:'pointer', fontSize:'0.875rem' }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(239,68,68,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}
+                onClick={() => { deleteList(listMenu.list.id); setListMenu(null); }}
+              >🗑 Delete List</button>
+            </div>
+          </>,
+          document.body
+        )}
+
+        {/* Right: Lead detail — fills remaining width and height */}
+        <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }}>
+          {!activeLead ? (
+            <div className="card card-p" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>👈</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Select a list to view leads</div>
+              <div className="fs-sm text-secondary" style={{ marginTop: '0.5rem' }}>Or create a new list to get started</div>
+            </div>
+          ) : (
+            <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* List header */}
+              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1rem' }}>{activeLead.name}</div>
+                  <div className="fs-xs text-muted">{(activeLead.count || 0).toLocaleString()} leads</div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ borderColor: 'var(--accent-primary)', color: 'var(--accent-primary)', fontWeight: 600 }}
+                    onClick={() => setAddLeadModal(true)}
+                  >👤 Add Lead</button>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setImportModal(true); setImportError(''); }}>
+                    + Import Leads
+                  </button>
+                </div>
+              </div>
+
+              {/* Toolbar: search + columns */}
+              <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <div className="search-box" style={{ flex: 1 }}>
+                  <span className="text-muted">🔍</span>
+                  <input placeholder="Search leads..." value={searchLeads} onChange={e => setSearchLeads(e.target.value)} />
+                </div>
+
+                {/* Columns toggle button */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                    onClick={() => setColPickerOpen(p => !p)}
+                  >
+                    <span>⊞</span> Columns
+                    <span style={{ background: 'var(--accent-primary)', color: '#fff', borderRadius: 99, padding: '0 5px', fontSize: '0.65rem', fontWeight: 700 }}>
+                      {visibleCols.length}
+                    </span>
+                  </button>
+                  {colPickerOpen && (
+                    <div
+                      style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 10, boxShadow: 'var(--shadow-md)', zIndex: 60, minWidth: 180, padding: '0.5rem 0', overflow: 'hidden' }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <div style={{ padding: '0.4rem 1rem', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Show / Hide Columns</div>
+                      {ALL_COLS.filter(col => !col.always).map(col => (
+                        <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.45rem 1rem', cursor: 'pointer', fontSize: '0.84rem' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                        >
+                          <input type="checkbox" checked={visibleCols.includes(col.key)}
+                            onChange={() => toggleCol(col.key)}
+                            style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                          />
+                          {col.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Leads table — scrollable */}
+              <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }} onClick={() => setColPickerOpen(false)}>
+                <table className="data-table" style={{ tableLayout: 'fixed', width: activeCols.reduce((s,c)=>s+c.w,0) + 'px', minWidth: '100%' }}>
+                  <colgroup>
+                    {activeCols.map(col => <col key={col.key} style={{ width: col.w }} />)}
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th>#</th>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Company</th>
-                      <th>Status</th>
+                      {activeCols.map(col => (
+                        <th key={col.key} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{col.label}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLeads.map((lead, i) => {
-                      const name = getLeadName(lead);
-                      const email = lead.email || lead.email_address || '—';
-                      const company = lead.company || lead.company_name || '—';
-                      const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-                      return (
-                        <tr key={i}>
-                          <td className="fs-sm" style={{ color: 'var(--text-muted)', width: 40 }}>{i + 1}</td>
-                          <td>
-                            <div className="flex-row" style={{ gap: '0.6rem' }}>
-                              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(99,102,241,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', fontWeight: 700, color: 'var(--accent-primary)', flexShrink: 0 }}>{initials || '?'}</div>
-                              <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{name}</span>
-                            </div>
-                          </td>
-                          <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{email}</td>
-                          <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{company}</td>
-                          <td><span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 20, background: 'rgba(16,185,129,0.12)', color: '#10b981', fontWeight: 600 }}>Active</span></td>
-                        </tr>
-                      );
-                    })}
-                    {filteredLeads.length === 0 && (
-                      <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No leads match your search.</td></tr>
-                    )}
+                    {filteredLeads.length === 0 ? (
+                      <tr>
+                        <td colSpan={activeCols.length} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                          {(activeLead.leads || []).length === 0
+                            ? 'No leads yet — click "+ Import Leads" to add some'
+                            : 'No leads match your search'}
+                        </td>
+                      </tr>
+                    ) : filteredLeads.map((lead, idx) => (
+                      <tr key={lead.id || idx}
+                        style={{ cursor: 'default' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.025)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        {activeCols.map(col => {
+                          if (col.key === '_actions') return (
+                            <td key="_actions" style={{ padding:'4px 8px', whiteSpace:'nowrap' }}>
+                              <div style={{ display:'flex', gap:'4px', justifyContent:'center' }}>
+                                <button title="Edit" onClick={() => openEdit(lead)}
+                                  style={{ background:'rgba(99,102,241,0.12)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:6, color:'var(--accent-primary)', cursor:'pointer', padding:'3px 7px', fontSize:'0.75rem', lineHeight:1 }}
+                                  onMouseEnter={e=>e.currentTarget.style.background='rgba(99,102,241,0.25)'}
+                                  onMouseLeave={e=>e.currentTarget.style.background='rgba(99,102,241,0.12)'}
+                                >✏</button>
+                                <button title="Delete" onClick={() => deleteLead(lead)}
+                                  style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:6, color:'var(--danger)', cursor:'pointer', padding:'3px 7px', fontSize:'0.75rem', lineHeight:1 }}
+                                  onMouseEnter={e=>e.currentTarget.style.background='rgba(239,68,68,0.25)'}
+                                  onMouseLeave={e=>e.currentTarget.style.background='rgba(239,68,68,0.1)'}
+                                >🗑</button>
+                              </div>
+                            </td>
+                          );
+                          if (col.key === 'name') return (
+                            <td key="name" style={{ fontWeight: 500 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                <div style={{ width: 30, height: 30, borderRadius: '50%', background: COLORS[idx % COLORS.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.65rem', color: '#fff', flexShrink: 0 }}>
+                                  {initials(lead.name)}
+                                </div>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.name || '—'}</span>
+                              </div>
+                            </td>
+                          );
+                          if (col.key === 'email') return (
+                            <td key="email" style={{ color: 'var(--accent-primary)', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <a href={`mailto:${lead.email}`} style={{ color: 'inherit', textDecoration: 'none' }}>{lead.email}</a>
+                            </td>
+                          );
+                          if (col.key === 'first_name') return (
+                            <td key="first_name" style={{ color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.first_name || '—'}</td>
+                          );
+                          if (col.key === 'last_name') return (
+                            <td key="last_name" style={{ color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.last_name || '—'}</td>
+                          );
+                          if (col.key === 'company') return (
+                            <td key="company" style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.company || '—'}</td>
+                          );
+                          if (col.key === 'phone') return (
+                            <td key="phone" style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.78rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.phone || '—'}</td>
+                          );
+                          if (col.key === 'title') return (
+                            <td key="title" style={{ color: 'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.title || lead.job_title || '—'}</td>
+                          );
+                          if (col.key === 'city') return (
+                            <td key="city" style={{ color: 'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.city || '—'}</td>
+                          );
+                          if (col.key === 'state') return (
+                            <td key="state" style={{ color: 'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.state || '—'}</td>
+                          );
+                          if (col.key === 'country') return (
+                            <td key="country" style={{ color: 'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lead.country || '—'}</td>
+                          );
+                          if (col.key === 'linkedin') return (
+                            <td key="linkedin" style={{ fontSize: '0.75rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                              {lead.linkedin_url || lead.linkedin ? <a href={lead.linkedin_url || lead.linkedin} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', textDecoration:'none' }}>{lead.linkedin_url || lead.linkedin}</a> : <span style={{ color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                          );
+                          if (col.key === 'created_at') return (
+                            <td key="created_at" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{lead.created_at?.slice(0, 10) || '—'}</td>
+                          );
+                          return null;
+                        })}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
-        )}
+
+              {/* Footer: row count */}
+              <div style={{ padding: '0.5rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.73rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                <span>Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredLeads.length.toLocaleString()}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{(activeLead.leads || []).length.toLocaleString()}</strong> leads</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Create List Modal */}
       {createModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div className="card card-p" style={{ width: 420 }}>
-            <h3 style={{ fontWeight: 700, marginBottom: '1rem' }}>Create Blank List</h3>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div className="card card-p" style={{ width: 400 }}>
+            <h3 style={{ marginBottom: '1.25rem' }}>Create New List</h3>
             <div className="form-group" style={{ marginBottom: '1rem' }}>
               <label className="form-label">List Name</label>
-              <input className="form-input" placeholder="e.g. SaaS Founders Q3" value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createList()} autoFocus />
+              <input
+                className="form-input"
+                placeholder="e.g. SaaS Founders Q3"
+                value={newListName}
+                onChange={e => setNewListName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createList()}
+                autoFocus
+              />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button className="btn btn-ghost" onClick={() => setCreateModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={createList}>Create List</button>
+            <div className="flex-row" style={{ justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button className="btn btn-ghost" onClick={() => { setCreateModal(false); setNewListName(''); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={createList} disabled={saving}>
+                {saving ? 'Creating…' : 'Create List'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Import CSV Modal */}
+      {/* ── Import Leads Modal (full column mapping) ───────────────── */}
       {importModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: 'var(--bg-secondary)', borderRadius: 16, width: 500, boxShadow: 'var(--shadow-lg)' }}>
+        <ImportLeads
+          onClose={() => { setImportModal(false); setImportError(''); }}
+          onImport={async (leads) => {
+            if (!selectedList) return;
+            // leads come from ImportLeads as rich objects; convert to API shape
+            const apiLeads = leads.map(l => ({
+              email:        l.email,
+              name:         l.name,
+              first_name:   l.first_name   || '',
+              last_name:    l.last_name    || '',
+              company:      l.company      || '',
+              title:        l.title        || '',
+              phone:        l.phone        || '',
+              city:         l.city         || '',
+              state:        l.state        || '',
+              country:      l.country      || '',
+              linkedin_url: l.linkedin_url || '',
+              customFields: l.customFields || {},
+            }));
+            setSaving(true);
+            const res = await api.post(`/leads/${selectedList.id}/import`, { leads: apiLeads });
+            setSaving(false);
+            if (res && !res.error) {
+              setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
+              setSelectedList(res);
+              setImportModal(false);
+              showToast(`${apiLeads.length} lead${apiLeads.length !== 1 ? 's' : ''} imported`);
+            } else {
+              setImportError(res?.error || 'Import failed');
+            }
+          }}
+        />
+      )}
+
+      {/* ── Add Single Lead Modal (full featured) ─────────────────── */}
+      {addLeadModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
+          onClick={() => { setAddLeadModal(false); setAddLeadErr(''); setAddLeadForm(EMPTY_LEAD); setAddCustomFields([]); setAddingKey(false); setNewKey(''); }}>
+
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 16, width: 520, maxHeight: '90vh', overflowY: 'auto', boxShadow: 'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
             <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontWeight: 700 }}>Import CSV</h3>
-              <button onClick={() => { setImportModal(false); setImportError(''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
-            </div>
-            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div
-                style={{ border: '2px dashed var(--border-color)', borderRadius: 12, padding: '2.5rem', textAlign: 'center', background: 'rgba(99,102,241,0.02)', cursor: 'pointer' }}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); handleCsvFile(e.dataTransfer.files[0]); }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📂</div>
-                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Drop your CSV here or click to browse</div>
-                <div className="fs-sm text-secondary" style={{ marginBottom: '1rem' }}>Required column: <code>email</code>. Optional: <code>first_name</code>, <code>last_name</code>, <code>company</code></div>
-                <input
-                  type="file"
-                  accept=".csv"
-                  ref={fileInputRef}
-                  style={{ display: 'none' }}
-                  onChange={e => handleCsvFile(e.target.files[0])}
-                />
-                <span className="btn btn-primary btn-sm">Browse File</span>
+              <div>
+                <h3 style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.2rem' }}>👤 Add Single Lead</h3>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Adding to <strong style={{ color: 'var(--text-secondary)' }}>{activeLead?.name}</strong></div>
               </div>
-              {importError && (
-                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.6rem 1rem', fontSize: '0.82rem', color: '#ef4444' }}>⚠ {importError}</div>
+              <button onClick={() => { setAddLeadModal(false); setAddLeadErr(''); setAddLeadForm(EMPTY_LEAD); setAddCustomFields([]); setAddingKey(false); setNewKey(''); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+            </div>
+
+            {/* Form */}
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              {addLeadErr && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.6rem 0.9rem', color: '#ef4444', fontSize: '0.82rem' }}>❌ {addLeadErr}</div>
               )}
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>— or paste emails below —</div>
-              <textarea className="form-input" rows={4} placeholder={"email1@domain.com\nemail2@domain.com"} value={pasteEmails} onChange={e => setPasteEmails(e.target.value)} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }} />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button className="btn btn-ghost" onClick={() => { setImportModal(false); setImportError(''); }}>Cancel</button>
-                <button className="btn btn-primary" onClick={importPasted} disabled={!pasteEmails.trim()}>Import Emails</button>
+
+              {/* Row 1: First / Last Name */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {[['firstName','First Name','John'],['lastName','Last Name','Doe']].map(([k,lbl,ph]) => (
+                  <div key={k} className="form-group">
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>{lbl}</label>
+                    <input className="form-input" placeholder={ph} value={addLeadForm[k]}
+                      onChange={e => setAddLeadForm(p => ({ ...p, [k]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleAddSingleLead()} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Row 2: Email */}
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: '0.8rem' }}>Email Address <span style={{ color: 'var(--danger)' }}>*</span></label>
+                <input className="form-input" type="email" placeholder="john@company.com" value={addLeadForm.email}
+                  onChange={e => { setAddLeadForm(p => ({ ...p, email: e.target.value })); setAddLeadErr(''); }}
+                  onKeyDown={e => e.key === 'Enter' && handleAddSingleLead()}
+                  style={{ borderColor: addLeadErr ? 'var(--danger)' : undefined }} />
+              </div>
+
+              {/* Row 3: Company / Job Title */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {[['company','Company','Acme Corp'],['jobTitle','Job Title','CEO']].map(([k,lbl,ph]) => (
+                  <div key={k} className="form-group">
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>{lbl}</label>
+                    <input className="form-input" placeholder={ph} value={addLeadForm[k]}
+                      onChange={e => setAddLeadForm(p => ({ ...p, [k]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleAddSingleLead()} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Row 4: Phone / City */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {[['phone','Phone','+1 555 0100'],['city','City','New York']].map(([k,lbl,ph]) => (
+                  <div key={k} className="form-group">
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>{lbl}</label>
+                    <input className="form-input" placeholder={ph} value={addLeadForm[k]}
+                      onChange={e => setAddLeadForm(p => ({ ...p, [k]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleAddSingleLead()} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Custom Fields Section */}
+              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.9rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>⚙ Custom Fields</div>
+                  {!addingKey && (
+                    <button onClick={() => setAddingKey(true)}
+                      style={{ background: 'none', border: '1px dashed rgba(99,102,241,0.4)', borderRadius: 6, color: 'var(--accent-primary)', fontSize: '0.75rem', padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}
+                    >+ Add Custom Field</button>
+                  )}
+                </div>
+
+                {addCustomFields.map((cf, idx) => (
+                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '2fr 3fr auto', gap: '0.4rem', marginBottom: '0.5rem', alignItems: 'center' }}>
+                    <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '5px 9px', fontSize: '0.78rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{cf.key}</div>
+                    <input className="form-input" placeholder={`Value for ${cf.key}`} value={cf.value}
+                      onChange={e => setAddCustomFields(p => p.map((f, i) => i === idx ? { ...f, value: e.target.value } : f))}
+                      style={{ fontSize: '0.8rem', padding: '5px 9px' }} />
+                    <button onClick={() => setAddCustomFields(p => p.filter((_, i) => i !== idx))}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1rem', padding: '4px 6px' }}>🗑</button>
+                  </div>
+                ))}
+
+                {addingKey && (
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                    <input autoFocus className="form-input" placeholder="Field name (e.g. Timezone, Revenue…)"
+                      value={newKey} onChange={e => setNewKey(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newKey.trim()) { setAddCustomFields(p => [...p, { key: newKey.trim(), value: '' }]); setNewKey(''); setAddingKey(false); }
+                        if (e.key === 'Escape') { setAddingKey(false); setNewKey(''); }
+                      }}
+                      style={{ flex: 1, fontSize: '0.8rem' }} />
+                    <button onClick={() => { if (newKey.trim()) { setAddCustomFields(p => [...p, { key: newKey.trim(), value: '' }]); setNewKey(''); setAddingKey(false); } }}
+                      style={{ background: 'var(--accent-primary)', border: 'none', borderRadius: 6, color: '#fff', padding: '6px 10px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}>✓</button>
+                    <button onClick={() => { setAddingKey(false); setNewKey(''); }}
+                      style={{ background: 'none', border: '1px solid var(--border-color)', borderRadius: 6, color: 'var(--text-muted)', padding: '6px 8px', cursor: 'pointer', fontSize: '0.8rem' }}>✕</button>
+                  </div>
+                )}
+
+                {addCustomFields.length === 0 && !addingKey && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No custom fields yet — click "+ Add Custom Field" to create one</div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.25rem' }}>
+                <button className="btn btn-ghost" onClick={() => { setAddLeadModal(false); setAddLeadErr(''); setAddLeadForm(EMPTY_LEAD); setAddCustomFields([]); setAddingKey(false); setNewKey(''); }}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleAddSingleLead} disabled={saving}>{saving ? 'Adding…' : 'Add Lead →'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Lead Modal ─────────────────────────────────────────── */}
+      {editModal && editLead && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}
+          onClick={() => { setEditModal(false); setEditErr(''); }}>
+          <div style={{ background:'var(--bg-secondary)', borderRadius:16, width:520, maxHeight:'90vh', overflowY:'auto', boxShadow:'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ padding:'1.25rem 1.5rem', borderBottom:'1px solid var(--border-color)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+              <div>
+                <h3 style={{ fontWeight:700, fontSize:'1.05rem', marginBottom:'0.2rem' }}>✏ Edit Lead</h3>
+                <div style={{ fontSize:'0.75rem', color:'var(--text-muted)' }}>{editLead.email}</div>
+              </div>
+              <button onClick={() => { setEditModal(false); setEditErr(''); }}
+                style={{ background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>
+            </div>
+
+            {/* Form — all inputs are flat/stable (no .map) to prevent focus loss */}
+            <div style={{ padding:'1.5rem', display:'flex', flexDirection:'column', gap:'0.9rem' }}>
+              {editErr && (
+                <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:8, padding:'0.6rem 0.9rem', color:'#ef4444', fontSize:'0.82rem' }}>❌ {editErr}</div>
+              )}
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">First Name</label>
+                  <input className="form-input" value={editForm.first_name}
+                    onChange={e => setEditForm(p => ({ ...p, first_name: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Last Name</label>
+                  <input className="form-input" value={editForm.last_name}
+                    onChange={e => setEditForm(p => ({ ...p, last_name: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Email <span style={{color:'#ef4444'}}>*</span></label>
+                <input className="form-input" type="email" value={editForm.email}
+                  onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
+                  style={{ borderColor: editErr && !editForm.email.includes('@') ? '#ef4444' : undefined }} />
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Company</label>
+                  <input className="form-input" value={editForm.company}
+                    onChange={e => setEditForm(p => ({ ...p, company: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Job Title</label>
+                  <input className="form-input" value={editForm.title}
+                    onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Phone</label>
+                  <input className="form-input" value={editForm.phone}
+                    onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">City</label>
+                  <input className="form-input" value={editForm.city}
+                    onChange={e => setEditForm(p => ({ ...p, city: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">State</label>
+                  <input className="form-input" value={editForm.state}
+                    onChange={e => setEditForm(p => ({ ...p, state: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Country</label>
+                  <input className="form-input" value={editForm.country}
+                    onChange={e => setEditForm(p => ({ ...p, country: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">LinkedIn URL</label>
+                <input className="form-input" placeholder="https://linkedin.com/in/…"
+                  value={editForm.linkedin_url}
+                  onChange={e => setEditForm(p => ({ ...p, linkedin_url: e.target.value }))} />
+              </div>
+
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:'0.75rem', marginTop:'0.25rem' }}>
+                <button className="btn btn-ghost" onClick={() => { setEditModal(false); setEditErr(''); }}>Cancel</button>
+                <button className="btn btn-primary" onClick={saveEdit} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save Changes'}</button>
               </div>
             </div>
           </div>

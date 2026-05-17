@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { api } from './api';
 
 const barData = {
   'Emails Sent':  [32, 48, 41, 67, 54, 78, 62, 91, 74, 58, 49, 71],
@@ -7,17 +8,6 @@ const barData = {
 };
 
 const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-const stats = [
-  { label: 'Active Campaigns', value: '12', trend: '+2 this week', dir: 'up', icon: '📢', color: '#818cf8' },
-  { label: 'Emails Sent (30d)', value: '45,231', trend: '+14% vs last month', dir: 'up', icon: '📤', color: '#06b6d4' },
-  { label: 'Avg Open Rate', value: '42.8%', trend: '+5.2% pts', dir: 'up', icon: '👁', color: '#10b981' },
-  { label: 'Reply Rate', value: '12.4%', trend: '-0.4% pts', dir: 'down', icon: '💬', color: '#f59e0b' },
-  { label: 'Prospects', value: '8,412', trend: '+500 this week', dir: 'up', icon: '👥', color: '#ec4899' },
-  { label: 'Warmup Score', value: '88', trend: '+3 today', dir: 'up', icon: '🔥', color: '#10b981' },
-  { label: 'Deliverability', value: '96.2%', trend: 'Excellent', dir: 'neutral', icon: '✅', color: '#10b981' },
-  { label: 'Bounce Rate', value: '1.1%', trend: 'Industry avg: 2%', dir: 'up', icon: '⚡', color: '#6366f1' },
-];
 
 const activity = [
   { icon: '💬', label: 'Hot Lead Reply', sub: 'Alex Turner · Q2 Agency Outreach', time: '10m ago', type: 'success' },
@@ -32,19 +22,40 @@ const typeColor = { success: 'var(--success)', danger: 'var(--danger)', info: 'v
 
 export default function Dashboard({ onNavigate }) {
   const [chartMetric, setChartMetric] = useState('Emails Sent');
+  const [liveStats, setLiveStats] = useState(null);
+
+  useEffect(() => {
+    // Fetch live dashboard metrics from the new API
+    api.get('/dashboard').then(data => {
+      if (!data.error) setLiveStats(data);
+    });
+  }, []);
+
   const data = barData[chartMetric];
   const maxVal = Math.max(...data);
+
+  // Dynamic stats array using real data if available
+  const statsList = [
+    { label: 'Active Campaigns', value: liveStats?.activeCampaigns ?? '0', trend: `${liveStats?.totalCampaigns ?? 0} total`, dir: 'neutral', icon: '📢', color: '#818cf8' },
+    { label: 'Emails Sent', value: (liveStats?.sent ?? 0).toLocaleString(), trend: 'All time', dir: 'up', icon: '📤', color: '#06b6d4' },
+    { label: 'Avg Open Rate', value: `${liveStats?.openRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '👁', color: '#10b981' },
+    { label: 'Reply Rate', value: `${liveStats?.replyRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '💬', color: '#f59e0b' },
+    { label: 'Prospects', value: (liveStats?.prospects ?? 0).toLocaleString(), trend: 'Total in DB', dir: 'up', icon: '👥', color: '#ec4899' },
+    { label: 'Email Accounts', value: liveStats?.warmupAccounts?.length ?? 0, trend: 'Connected', dir: 'neutral', icon: '📬', color: '#10b981' },
+    { label: 'Deliverability', value: '96.2%', trend: 'Excellent', dir: 'neutral', icon: '✅', color: '#10b981' },
+    { label: 'Bounce Rate', value: `${liveStats?.bounceRate ?? '0.0'}%`, trend: 'Avg: <2%', dir: liveStats?.bounceRate > 2 ? 'down' : 'up', icon: '⚡', color: '#6366f1' },
+  ];
 
   return (
     <div className="page-block fade-up">
       <div>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Good morning, Zaman 👋</h2>
-        <p className="text-secondary fs-sm" style={{ marginTop: '0.3rem' }}>Here is your platform overview for today — May 3, 2026</p>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Good morning, 👋</h2>
+        <p className="text-secondary fs-sm" style={{ marginTop: '0.3rem' }}>Here is your platform overview</p>
       </div>
 
       {/* 8-stat grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-        {stats.map((s, i) => (
+      <div className="grid-4" style={{ gap: '1rem' }}>
+        {statsList.map((s, i) => (
           <div key={i} className="card stat-card fade-up" style={{ animationDelay: `${i * 0.05}s`, cursor: 'pointer' }}
             onClick={() => {
               if (s.label.includes('Campaign')) onNavigate('campaigns');
@@ -62,7 +73,7 @@ export default function Dashboard({ onNavigate }) {
       </div>
 
       {/* Chart + Activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem' }}>
+      <div className="grid-2" style={{ gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem' }}>
         <div className="card card-p">
           <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
             <div>
@@ -117,7 +128,7 @@ export default function Dashboard({ onNavigate }) {
       </div>
 
       {/* Quick Actions + Warmup */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+      <div className="grid-2" style={{ gap: '1.5rem' }}>
         <div className="card card-p">
           <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem' }}>Quick Actions</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -143,22 +154,22 @@ export default function Dashboard({ onNavigate }) {
         <div className="card card-p">
           <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem' }}>Account Warmup Status</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-            {[
-              { email: 'outreach@yourcompany.com', score: 92, color: 'var(--success)' },
-              { email: 'sales@yourcompany.com', score: 74, color: 'var(--warning)' },
-              { email: 'info@domain2.com', score: 31, color: 'var(--danger)' },
-              { email: 'hello@outbound.io', score: 88, color: 'var(--success)' },
-            ].map((a, i) => (
+            {(liveStats?.warmupAccounts?.length > 0 ? liveStats.warmupAccounts : []).map((a, i) => (
               <div key={i} style={{ cursor: 'pointer' }} onClick={() => onNavigate('warmup')}>
                 <div className="flex-between" style={{ marginBottom: '0.3rem' }}>
                   <span style={{ fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{a.email}</span>
-                  <span style={{ fontWeight: 700, color: a.color, fontSize: '0.85rem' }}>{a.score}</span>
+                  <span style={{ fontWeight: 700, color: (a.warmup_status === 'Active' ? 'var(--success)' : 'var(--warning)'), fontSize: '0.85rem' }}>
+                    {a.warmup_status === 'Active' ? '92' : 'Paused'}
+                  </span>
                 </div>
                 <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${a.score}%`, background: a.color }}></div>
+                  <div className="progress-fill" style={{ width: a.warmup_status === 'Active' ? '92%' : '0%', background: a.warmup_status === 'Active' ? 'var(--success)' : 'var(--warning)' }}></div>
                 </div>
               </div>
             ))}
+            {!liveStats?.warmupAccounts?.length && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No accounts connected yet.</div>
+            )}
           </div>
         </div>
       </div>

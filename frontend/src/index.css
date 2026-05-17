@@ -44,7 +44,7 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow: hidden;
+  overflow: hidden; /* keep desktop layout fixed */
 }
 h1,h2,h3,h4,h5,h6 { font-family: 'Outfit', sans-serif; line-height: 1.2; }
 a { color: inherit; text-decoration: none; }
@@ -203,13 +203,31 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
 
 .page-content {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 2rem;
+  overflow: hidden;          /* children handle their own scroll */
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .page-content::-webkit-scrollbar { width: 6px; }
 .page-content::-webkit-scrollbar-track { background: transparent; }
 .page-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* Every page component fills the content area */
+.page-block {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;   /* pages with lots of content scroll within the block */
+  overflow-x: hidden;
+}
+.page-block::-webkit-scrollbar { width: 5px; }
+.page-block::-webkit-scrollbar-track { background: transparent; }
+.page-block::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+.fade-up { animation: fadeUp 0.25s ease both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
 
 /* ==================== BUTTONS ==================== */
 .btn {
@@ -483,12 +501,14 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
 
 /* ==================== ANIMATIONS ==================== */
 @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
 .fade-up { animation: fadeUp 0.5s cubic-bezier(.16,1,.3,1) forwards; }
 .pulse { animation: pulse 2s ease-in-out infinite; }
 .spin { animation: spin 1s linear infinite; }
+
 
 /* Stagger delays */
 .d-1 { animation-delay: 0.05s; opacity: 0; }
@@ -509,3 +529,147 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
 .fw-700 { font-weight: 700; }
 .fs-sm { font-size: 0.8rem; }
 .fs-xs { font-size: 0.7rem; }
+
+/* ==================== HAMBURGER BUTTON ==================== */
+.hamburger-btn {
+  display: none;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  width: 38px; height: 38px;
+  align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-primary);
+  font-size: 1.2rem; flex-shrink: 0;
+  transition: background 0.2s;
+}
+.hamburger-btn:hover { background: rgba(99,102,241,0.12); }
+
+/* Sidebar overlay backdrop */
+.sidebar-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 19;
+}
+
+/* ==================== RESPONSIVE TABLE WRAPPER ==================== */
+.table-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ==================== MODAL RESPONSIVE ==================== */
+.modal-responsive {
+  width: 90vw !important;
+  max-width: 520px !important;
+}
+
+/* ==================== MOBILE BREAKPOINT (≤ 768px) ==================== */
+@media (max-width: 768px) {
+  /* Allow body scroll on mobile */
+  body { overflow: auto; }
+
+  .app-container { overflow: auto; }
+
+  /* Show hamburger */
+  .hamburger-btn { display: flex; }
+
+  /* Sidebar becomes fixed overlay */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(.16,1,.3,1);
+    z-index: 20;
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.open { display: block; }
+
+  /* Main content takes full width */
+  .main-content { width: 100%; min-width: 0; }
+
+  /* Header adjustments */
+  .main-header { padding: 0 1rem; gap: 0.5rem; }
+  .header-search-box { display: none; }
+  .page-title { font-size: 0.95rem; }
+  .header-actions { gap: 0.4rem; }
+
+  /* Page content padding */
+  .page-content { padding: 1rem; }
+
+  /* Grids collapse to 1 or 2 columns */
+  .grid-2 { grid-template-columns: 1fr; gap: 1rem; }
+  .grid-3 { grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .grid-4 { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
+  /* Dashboard stat grid */
+  [style*="gridTemplateColumns: 'repeat(4, 1fr)'"],
+  [style*="grid-template-columns: repeat(4, 1fr)"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* Chart + Activity stacks vertically */
+  [style*="gridTemplateColumns: '1.6fr 1fr'"],
+  [style*="1.6fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Flex rows wrap on mobile */
+  .flex-between { flex-wrap: wrap; gap: 0.75rem; }
+  .flex-row { flex-wrap: wrap; }
+  .header-actions .btn { display: none; } /* hide "+ New Campaign" btn in header on mobile */
+
+  /* Tables get horizontal scroll */
+  .card .data-table,
+  .card table { display: block; overflow-x: auto; white-space: nowrap; }
+
+  /* Inbox layout stacks */
+  .inbox-layout { flex-direction: column; }
+  .inbox-list { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); max-height: 300px; }
+
+  /* Stat cards */
+  .stat-value { font-size: 1.5rem; }
+
+  /* Button groups on mobile */
+  .btn { white-space: nowrap; font-size: 0.8rem; padding: 0.5rem 0.9rem; }
+  .btn-sm { padding: 0.35rem 0.65rem; font-size: 0.75rem; }
+
+  /* Card padding */
+  .card-p { padding: 1rem; }
+  .stat-card { padding: 1rem; }
+
+  /* Modals full-screen on mobile */
+  [style*="width: 860px"],
+  [style*="width:860px"] { width: 96vw !important; }
+  [style*="width: 520px"],
+  [style*="width:520px"] { width: 96vw !important; }
+  [style*="width: 480px"],
+  [style*="width:480px"] { width: 96vw !important; }
+  [style*="width: 620px"],
+  [style*="width:620px"] { width: 96vw !important; }
+  [style*="width: 700px"],
+  [style*="width:700px"] { width: 96vw !important; }
+
+  /* Fixed modal containers use full width */
+  [style*="position: fixed"][style*="align-items: center"] > div,
+  [style*="position:fixed"][style*="alignItems:'center'"] > div {
+    max-width: 96vw !important;
+    width: 96vw !important;
+  }
+
+  /* Header search box hidden, page-title visible */
+  .search-box[style*="width: 220"] { display: none; }
+
+  /* Accounts page button row wraps */
+  .accounts-header-btns { flex-direction: column; align-items: stretch; }
+}
+
+/* ==================== SMALL MOBILE (≤ 480px) ==================== */
+@media (max-width: 480px) {
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .page-content { padding: 0.75rem; }
+  .main-header { padding: 0 0.75rem; }
+  .stat-value { font-size: 1.3rem; }
+  .sidebar-footer { display: none; } /* hide warmup widget in sidebar on very small screens */
+}
+
