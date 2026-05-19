@@ -81,6 +81,16 @@ export default function Signup({ onGoLogin }) {
                 Didn't receive it? Check your spam folder.
               </p>
             </div>
+
+            {/* Fallback: show OTP on screen when email can't be delivered */}
+            {debugOtp && (
+              <div style={{ marginBottom:'1rem', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.4)', borderRadius:10, padding:'0.85rem 1rem', textAlign:'center' }}>
+                <div style={{ fontSize:'0.75rem', color:'var(--text-muted)', marginBottom:'0.4rem' }}>⚠️ Email not configured — your verification code is:</div>
+                <div style={{ fontSize:'2rem', fontWeight:900, letterSpacing:'8px', color:'var(--accent-primary)', fontFamily:'monospace' }}>{debugOtp}</div>
+                <div style={{ fontSize:'0.72rem', color:'var(--text-muted)', marginTop:'0.3rem' }}>Copy this code and paste it below</div>
+              </div>
+            )}
+
             <form onSubmit={handleVerify} style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
               <div className="form-group">
                 <label className="form-label">Verification Code</label>

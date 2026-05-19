@@ -33,11 +33,16 @@ router.post('/signup', async (req: any, res: Response) => {
     'INSERT INTO pending_registrations (name, email, password_hash, otp, expires_at) VALUES (?, ?, ?, ?, ?)'
   ).run(name, email, hash, otp, expires);
 
-  // Send OTP email
-  try { await sendOtpEmail(email, otp, 'verify'); } catch (e) { console.error('Email error:', e); }
+  // Send OTP email — if it fails for any reason, include OTP in response as fallback
+  let emailSent = false;
+  try { await sendOtpEmail(email, otp, 'verify'); emailSent = true; } catch (e) { console.error('[OTP Email Error]:', e); }
 
-  const debugOtp = (!process.env.EMAIL_USER) ? otp : undefined;
-  res.json({ message: 'Verification code sent to your email', debugOtp });
+  // Return OTP in response if email wasn't sent (missing config OR send failure)
+  const debugOtp = !emailSent ? otp : undefined;
+  const message  = emailSent
+    ? 'Verification code sent to your email'
+    : 'Email could not be sent — use the code displayed on screen';
+  res.json({ message, debugOtp });
 });
 
 // POST /api/auth/verify-email — create account ONLY if OTP is correct
