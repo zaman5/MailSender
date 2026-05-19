@@ -17,26 +17,29 @@ export async function sendOtpEmail(to: string, otp: string, type: 'verify' | 're
     <p style="color:#64748b;font-size:12px">If you didn't request this, ignore this email. Do not share this code.</p>
   </div>`;
 
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.log(`[OTP] Code for ${to}: ${otp} (type: ${type})`);
-    return;
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
+  const host = process.env.EMAIL_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.EMAIL_PORT || '465', 10);
+
+  if (!user || !pass) {
+    console.log(`[OTP] No email credentials set. Code for ${to}: ${otp} (type: ${type})`);
+    throw new Error('EMAIL_USER or EMAIL_PASS not configured');
   }
 
-  // Use explicit Gmail SMTP — works for both @gmail.com and Google Workspace custom domains
   const transport = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
+    host,
+    port,
+    secure: port === 465,   // true for 465 (SSL), false for 587 (STARTTLS)
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false }, // allow self-signed certs (needed for some IONOS setups)
   });
 
   await transport.sendMail({
-    from: `"MailSender" <${process.env.EMAIL_USER}>`,
+    from: `"MailSender" <${user}>`,
     to,
     subject,
     html,
   });
 }
+
