@@ -230,7 +230,7 @@ export default function Prospects() {
   // ── Import leads (CSV or paste) ───────────────────────────
   async function importLeads(rawLeads) {
     if (!selectedList) return;
-    if (!rawLeads.length) { setImportError('No valid emails found.'); return; }
+    if (!rawLeads.length) throw new Error('No valid emails found.');
 
     setSaving(true);
     const res = await api.post(`/leads/${selectedList.id}/import`, { leads: rawLeads });
@@ -241,10 +241,9 @@ export default function Prospects() {
       setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
       setSelectedList(res);
       setPasteEmails('');
-      setImportModal(false);
-      showToast(`${rawLeads.length} leads imported successfully`);
+      showToast(`${rawLeads.length} lead${rawLeads.length !== 1 ? 's' : ''} imported successfully`);
     } else {
-      setImportError(res?.error || 'Failed to import leads');
+      throw new Error(res?.error || 'Failed to import leads');
     }
   }
 

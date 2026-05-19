@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -19,7 +20,10 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+// Use body-parser directly — express.json() limit option is broken in Express 5
+// 52428800 bytes = 50 MB — needed for bulk lead imports
+app.use(bodyParser.json({ limit: 52428800 }));
+app.use(bodyParser.urlencoded({ limit: 52428800, extended: true }));
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 

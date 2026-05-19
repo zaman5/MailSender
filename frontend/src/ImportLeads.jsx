@@ -177,6 +177,8 @@ export default function ImportLeads({ onImport, onClose }) {
   const fileRef = useRef();
   const [previewRows, setPreviewRows] = useState([]); // {lead, status, reason}
   const [selectedRows, setSelectedRows] = useState(new Set()); // indices of rows to import
+  const [importing, setImporting] = useState(false);   // true while API call is in flight
+  const [importErr,  setImportErr]  = useState('');    // error message from API
 
   function loadFile(file) {
     if (!file) return;
@@ -304,11 +306,18 @@ export default function ImportLeads({ onImport, onClose }) {
     setStep(3);
   }
 
-  function doImport() {
+  async function doImport() {
     const leads = previewRows.filter(r => selectedRows.has(r.idx) && r.status === 'ok').map(r => r.lead);
     if (!leads.length) { alert('No leads selected to import.'); return; }
-    onImport(leads);
-    onClose();
+    setImporting(true);
+    setImportErr('');
+    try {
+      await onImport(leads);   // wait for API call to complete
+      onClose();               // only close AFTER success
+    } catch (err) {
+      setImportErr(err?.message || 'Import failed — please try again.');
+      setImporting(false);
+    }
   }
 
   const samples = csvData ? csvData.rows.slice(0, 3) : [];
@@ -511,15 +520,31 @@ export default function ImportLeads({ onImport, onClose }) {
               </table>
             </div>
 
-            <div style={{ padding:'1rem 1.5rem', borderTop:'1px solid var(--border-color)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
-              <div style={{ fontSize:'0.82rem', color:'var(--text-muted)' }}>
-                {selectedRows.size} lead{selectedRows.size!==1?'s':''} will be imported
-              </div>
-              <div style={{ display:'flex', gap:'0.75rem' }}>
-                <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button>
-                <button className="btn btn-primary" onClick={doImport} disabled={selectedRows.size===0}>
-                  Import {selectedRows.size} Lead{selectedRows.size!==1?'s':''} →
-                </button>
+            <div style={{ padding:'1rem 1.5rem', borderTop:'1px solid var(--border-color)', display:'flex', flexDirection:'column', gap:'0.6rem', flexShrink:0 }}>
+              {/* Error banner — shown if API call fails */}
+              {importErr && (
+                <div style={{ padding:'0.6rem 1rem', background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.4)', borderRadius:8, fontSize:'0.8rem', color:'#f87171' }}>
+                  ❌ {importErr}
+                </div>
+              )}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div style={{ fontSize:'0.82rem', color:'var(--text-muted)' }}>
+                  {selectedRows.size} lead{selectedRows.size!==1?'s':''} will be imported
+                </div>
+                <div style={{ display:'flex', gap:'0.75rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setStep(2)} disabled={importing}>← Back</button>
+                  <button className="btn btn-primary" onClick={doImport}
+                    disabled={selectedRows.size===0 || importing}
+                    style={{ minWidth: 160, opacity: (selectedRows.size===0 || importing) ? 0.7 : 1 }}>
+                    {importing
+                      ? <span style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
+                          <span style={{ display:'inline-block', width:14, height:14, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin 0.7s linear infinite' }}/>
+                          Importing…
+                        </span>
+                      : `Import ${selectedRows.size} Lead${selectedRows.size!==1?'s':''} →`
+                    }
+                  </button>
+                </div>
               </div>
             </div>
           </>

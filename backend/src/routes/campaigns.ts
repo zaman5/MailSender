@@ -80,12 +80,12 @@ router.get('/:id/analytics', requireAuth, (req: AuthRequest, res: Response) => {
 router.post('/:id/analytics/reset', requireAuth, (req: AuthRequest, res: Response) => {
   const c = db.prepare('SELECT id FROM campaigns WHERE id=? AND user_id=?').get(req.params.id, req.userId) as any;
   if (!c) return res.status(404).json({ error: 'Not found' });
-  // Reset campaign counters
+  // Reset campaign counters (replies column added via migration in db.ts)
   db.prepare('UPDATE campaigns SET sent=0, opens=0, replies=0, bounced=0 WHERE id=?').run(c.id);
   // Reset ALL lead counters and statuses back to fresh
   db.prepare(`
     UPDATE campaign_leads 
-    SET sent=0, opened=0, clicked=0, replied=0, step_index=0, status='In Progress' 
+    SET sent=0, opened=0, clicked=0, replied=0, step_index=0, status='In Progress', next_step_at=0
     WHERE campaign_id=?
   `).run(c.id);
   res.json({ success: true });

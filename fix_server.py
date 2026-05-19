@@ -251,10 +251,11 @@ echo "INDEX_TS_OK" """)
 # 6. Install deps + restart
 print("\n[6] Installing backend dependencies...")
 ssh_run(f"cd {REMOTE}/backend && npm install 2>&1 | tail -5", timeout=240)
+ssh_run(f"cd {REMOTE}/backend && npx tsc 2>&1 | tail -10", timeout=120)
 
 print("\n[7] Restarting backend via PM2...")
 ssh_run("pm2 delete mailsender-api 2>/dev/null || true")
-ssh_run(f"cd {REMOTE}/backend && pm2 start src/index.ts --name mailsender-api --interpreter ts-node 2>&1", timeout=60)
+ssh_run(f"cd {REMOTE}/backend && pm2 start dist/index.js --name mailsender-api 2>&1", timeout=60)
 ssh_run("pm2 save 2>&1 | tail -1")
 
 print("\nWaiting 6 seconds for backend to start...")

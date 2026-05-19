@@ -382,15 +382,17 @@ export default function CampaignLeads({ campaign, active }) {
     const fresh = newLeads
       .filter(l => l.email && !existing.has(l.email.toLowerCase()))
       .map((l, i) => ({ ...l, color: COLORS[(leads.length + i) % COLORS.length] }));
-    if (fresh.length === 0) { showToast('⚠ All leads already exist in this campaign'); return; }
-    // Save to backend
+    if (fresh.length === 0) throw new Error('All leads already exist in this campaign');
+    // Save to backend — throw on error so ImportLeads can display it
     if (campaign?.id) {
-      await api.post(`/campaigns/${campaign.id}/leads`, fresh);
+      const res = await api.post(`/campaigns/${campaign.id}/leads`, fresh);
+      if (res?.error) throw new Error(res.error);
     }
     setLeads(prev => [...prev, ...fresh]);
     const skipped = newLeads.length - fresh.length;
     showToast(`✅ ${fresh.length} lead(s) imported${skipped ? ` · ${skipped} duplicate(s) skipped` : ''}`);
   }
+
 
   async function handleSingleAdd(lead) {
     if (leads.some(l => l.email.toLowerCase() === lead.email.toLowerCase())) {

@@ -289,6 +289,18 @@ try {
   console.log('[DB] campaigns: added column settings_json');
 } catch (_) { /* already exists */ }
 
+// ── Migration: add replies column to campaigns (was missing, causing 500s) ─────
+try {
+  db.prepare(`ALTER TABLE campaigns ADD COLUMN replies INTEGER DEFAULT 0`).run();
+  console.log('[DB] campaigns: added column replies');
+} catch (_) { /* already exists */ }
+
+// ── Migration: add warmup_status column to email_accounts ──────────────────────
+try {
+  db.prepare(`ALTER TABLE email_accounts ADD COLUMN warmup_status TEXT DEFAULT 'inactive'`).run();
+  console.log('[DB] email_accounts: added column warmup_status');
+} catch (_) { /* already exists */ }
+
 // ── Migration: add step_index to campaign_leads ────────────────────────────────
 try {
   db.prepare(`ALTER TABLE campaign_leads ADD COLUMN step_index INTEGER DEFAULT 0`).run();

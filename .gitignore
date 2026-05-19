@@ -6,6 +6,7 @@ backend/node_modules/
 # Build outputs
 frontend/dist/
 frontend/dist-ssr/
+backend/dist/
 
 # Environment files
 .env
@@ -31,3 +32,16 @@ yarn-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# SQLite database — never commit, lives only on the server
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# One-off helper/debug scripts
+*.py
+deploy_*.py
+fix_*.py
+check_*.py
+get_*.py
+apply_*.py

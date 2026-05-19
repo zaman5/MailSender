@@ -55,10 +55,11 @@ print("\n=== Setting up Backend ===")
 run(ssh, "which ts-node || npm install -g ts-node typescript 2>&1 | tail -3", timeout=120)
 run(ssh, "which pm2 || npm install -g pm2 2>&1 | tail -3", timeout=120)
 run(ssh, "cd /tmp/mailsender/backend && npm install 2>&1 | tail -8", timeout=240)
+run(ssh, "cd /tmp/mailsender/backend && npx tsc 2>&1 | tail -10", timeout=120)
 
 print("\n=== Restarting backend ===")
 run(ssh, "pm2 delete mailsender-api 2>/dev/null || true")
-run(ssh, "cd /tmp/mailsender/backend && pm2 start src/index.ts --name mailsender-api --interpreter ts-node 2>&1", timeout=60)
+run(ssh, "cd /tmp/mailsender/backend && pm2 start dist/index.js --name mailsender-api 2>&1", timeout=60)
 run(ssh, "pm2 save 2>&1")
 run(ssh, "sleep 4 && pm2 status")
 

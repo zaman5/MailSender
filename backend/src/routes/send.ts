@@ -36,7 +36,8 @@ function applyVariables(text: string, lead: any, account: any, signature: string
     '{{country}}':          lead.country || '',
     '{{linkedin_url}}':     lead.linkedin_url || '',
     '{{sender_name}}':      senderName,
-    '{{sender_signature}}': signature || senderName,
+    // Convert \n to <br> so multi-line signatures render correctly in HTML email
+    '{{sender_signature}}': (signature || senderName).replace(/\r?\n/g, '<br>'),
   };
   for (const [key, val] of Object.entries(vars)) {
     text = text.split(key).join(val);
@@ -163,12 +164,15 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
   if (!campaign)                       return { started: false, message: 'Campaign not found' };
   if (campaign.status !== 'active')    return { started: false, message: 'Campaign is paused. Toggle it ON first.' };
 
-  const accounts: any[] = db.prepare(`
+  const allAccounts: any[] = db.prepare(`
     SELECT ea.* FROM campaign_accounts ca
     JOIN email_accounts ea ON ea.id = ca.account_id
     WHERE ca.campaign_id = ?
   `).all(campaignId);
-  if (!accounts.length) return { started: false, message: 'No email accounts assigned. Go to Settings → Sending Email Accounts.' };
+  if (!allAccounts.length) return { started: false, message: 'No email accounts assigned. Go to Settings → Sending Email Accounts.' };
+
+  // ── Shuffle accounts randomly so different accounts are used each run ─────
+  const accounts = [...allAccounts].sort(() => Math.random() - 0.5);
 
   const seqRow = db.prepare('SELECT steps_json, schedule_json FROM campaign_sequences WHERE campaign_id=?').get(campaignId) as any;
   const steps: any[] = seqRow?.steps_json ? (() => { try { return JSON.parse(seqRow.steps_json); } catch { return []; } })() : [];
@@ -212,7 +216,13 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
     WHERE campaign_id=?
       AND status NOT IN ('Bounced', 'Completed', 'Replied')
       AND (step_index IS NULL OR step_index < ?)
-      AND (next_step_at IS NULL OR next_step_at <= ?)
+      AND (
+        -- New leads (step 0): always ready, next_step_at starts at 0
+        (step_index IS NULL OR step_index = 0)
+        OR
+        -- Follow-up steps: only ready when next_step_at was explicitly set AND is in the past
+        (step_index > 0 AND next_step_at IS NOT NULL AND next_step_at > 0 AND next_step_at <= ?)
+      )
     ORDER BY created_at ASC
     LIMIT ?
   `).all(campaignId, totalSteps, now, maxEmails) as any[]);
@@ -230,15 +240,14 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
     message: `✅ Sending step emails to ${leads.length} lead(s) via ${accounts.length} account(s). Performance column updates live.`,
   };
 
+  // ── Lock BEFORE launching async worker to prevent race-condition double-sends ──
+  runningCampaigns.add(campaignId);
+
   // Launch async worker
   (async () => {
-    // ── Lock this campaign ────────────────────────────────────────────────────
-    runningCampaigns.add(campaignId);
-
   try {
     let baseDelayMs = 0;
     if (deliveryMode === 'quick') {
-      // In Quick mode, users expect rapid delivery. We use a fixed 2s delay.
       baseDelayMs = 2000;
     } else if (deliveryMode === 'custom') {
       baseDelayMs = customMs;
@@ -314,12 +323,17 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
         const nextStep  = stepIdx + 1;
         const newStatus = nextStep >= totalSteps ? 'Completed' : 'In Progress';
 
-        // Calculate exact timestamp when the next step is allowed to send
+        // Calculate exact timestamp when the next step is allowed to send.
+        // NOTE: SequenceBuilder stores delay as 'waitDays' (integer days) — use that field.
         let nextStepAt = 0;
         if (nextStep < totalSteps) {
           const ns = steps[nextStep];
-          const delayMs = ((parseFloat(ns.delayDays) || 0) * 86400000) + ((parseFloat(ns.delayMinutes) || 0) * 60000);
-          nextStepAt = Date.now() + delayMs;
+          // Support both field names for backward compatibility
+          const waitDays = parseFloat(ns.waitDays ?? ns.delayDays ?? '0') || 0;
+          const waitMinutes = parseFloat(ns.delayMinutes ?? '0') || 0;
+          const delayMs = (waitDays * 86400000) + (waitMinutes * 60000);
+          // Minimum 60 seconds to prevent instant resend on next cron tick
+          nextStepAt = Date.now() + Math.max(delayMs, 60000);
         }
 
         // ── Per-lead counters (this is the only place that increments them) ──
