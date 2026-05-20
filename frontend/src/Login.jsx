@@ -43,13 +43,26 @@ export default function Login({ onGoSignup, onGoForgot }) {
           <button onClick={onGoSignup} style={link}>Create account</button>
         </div>
         <div style={{ borderTop:'1px solid var(--border-color)', marginTop:'1.5rem', paddingTop:'1rem' }}>
-          <a href="/MailSender.zip" download className="download-apk-btn">
+          <a href="/MailSender.zip?v=2" download className="download-apk-btn">
             <span>📦</span> Download Android App (ZIP)
           </a>
           <div style={{ textAlign:'center', marginTop:'0.5rem', fontSize:'0.75rem' }}>
-            <a href="/MailSender-debug.apk" download style={{ color:'var(--text-secondary)', textDecoration:'underline' }}>
+            <a href="/MailSender-debug.apk?v=2" download style={{ color:'var(--text-secondary)', textDecoration:'underline' }}>
               Direct APK download
             </a>
+          </div>
+          <div style={{ 
+            marginTop: '0.85rem', 
+            padding: '0.5rem 0.75rem', 
+            background: 'rgba(99, 102, 241, 0.05)', 
+            border: '1px solid rgba(99, 102, 241, 0.15)', 
+            borderRadius: '8px', 
+            fontSize: '0.72rem', 
+            color: 'var(--text-muted)',
+            lineHeight: '1.3',
+            textAlign: 'center'
+          }}>
+            ℹ️ <b>Chrome Tip:</b> If download fails or says "File wasn't available", press <b>Ctrl + F5</b> to refresh or right-click the button and select <b>"Save link as..."</b>.
           </div>
         </div>
       </div>

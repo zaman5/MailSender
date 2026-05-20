@@ -96,7 +96,10 @@ nginx_conf = r"""server {
         proxy_connect_timeout 60s;
         proxy_read_timeout 60s;
     }
-    location / { try_files $uri $uri/ /index.html; }
+    location / { 
+        try_files $uri $uri/ /index.html; 
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+    }
     location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
     gzip on;
     gzip_types text/plain text/css application/javascript application/json;
