@@ -50,3 +50,4 @@ apply_*.py
 frontend/jdk17/
 frontend/jdk21/
 *.apk
+*.zip
