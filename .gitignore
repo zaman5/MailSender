@@ -45,3 +45,8 @@ fix_*.py
 check_*.py
 get_*.py
 apply_*.py
+
+# Local heavy binaries and packages
+frontend/jdk17/
+frontend/jdk21/
+*.apk

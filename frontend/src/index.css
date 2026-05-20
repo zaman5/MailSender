@@ -753,3 +753,35 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
   .tab-label-text { display: none; }
   .fab { bottom: 16px; right: 16px; width: 50px; height: 50px; font-size: 1.5rem; }
 }
+
+/* ==================== ANDROID DOWNLOAD BUTTON ==================== */
+.download-apk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.8rem;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px dashed var(--accent-primary);
+  border-radius: 12px;
+  color: var(--accent-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.download-apk-btn:hover {
+  background: var(--accent-primary);
+  color: #fff;
+  border-style: solid;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.download-apk-btn:active {
+  transform: translateY(0);
+}

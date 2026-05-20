@@ -42,6 +42,11 @@ export default function Login({ onGoSignup, onGoForgot }) {
           <span style={{ margin:'0 0.5rem' }}>·</span>
           <button onClick={onGoSignup} style={link}>Create account</button>
         </div>
+        <div style={{ borderTop:'1px solid var(--border-color)', marginTop:'1.5rem', paddingTop:'1rem' }}>
+          <a href="/MailSender-debug.apk" download className="download-apk-btn">
+            <span>🤖</span> Download Android App (APK)
+          </a>
+        </div>
       </div>
     </div>
   );
