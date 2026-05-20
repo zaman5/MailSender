@@ -195,6 +195,20 @@ export default function Accounts({ userId }) {
     showToast(`✅ Tag "${clean}" applied to ${acctIds.length} accounts`);
   }
 
+  async function handleBulkDelete() {
+    const acctIds = accounts.filter(a => selected.includes(a.email) && a.id).map(a => a.id);
+    if (acctIds.length === 0) return;
+    try {
+      showToast('Removing accounts...');
+      await Promise.all(acctIds.map(id => api.delete(`/accounts/${id}`)));
+      setAccounts(prev => prev.filter(a => !selected.includes(a.email)));
+      setSelected([]);
+      showToast(`Removed ${acctIds.length} account(s)`);
+    } catch (err) {
+      showToast('❌ Failed to remove some accounts');
+    }
+  }
+
   const filtered = accounts
     .filter(a => a.email.toLowerCase().includes(search.toLowerCase()))
     .filter(a => !tagFilter || (accountTags[a.id] || []).includes(tagFilter));
@@ -571,7 +585,7 @@ export default function Accounts({ userId }) {
           <div style={{ marginLeft:'auto', display:'flex', gap:'0.35rem', alignItems:'center', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.3)', borderRadius:8, padding:'3px 10px' }}>
             <span style={{ fontSize:'0.75rem', color:'var(--accent-primary)', fontWeight:600 }}>{selected.length} selected</span>
             <button className="btn btn-ghost btn-sm" style={{ fontSize:'0.72rem', padding:'2px 8px' }} onClick={() => setBulkTagModal(true)}>🏷 Tag</button>
-            <button className="btn btn-danger btn-sm" style={{ fontSize:'0.72rem', padding:'2px 8px' }} onClick={() => { setAccounts(prev => prev.filter(a => !selected.includes(a.email))); setSelected([]); showToast('Removed'); }}>🗑</button>
+            <button className="btn btn-danger btn-sm" style={{ fontSize:'0.72rem', padding:'2px 8px' }} onClick={handleBulkDelete}>🗑</button>
             <button className="btn btn-ghost btn-sm" style={{ fontSize:'0.72rem', padding:'2px 8px' }} onClick={() => setSelected([])}>✕</button>
           </div>
         )}

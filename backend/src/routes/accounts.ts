@@ -130,90 +130,95 @@ function smtpAuthTest(
   });
 }
 
-// ─── POST /api/accounts/test-connection ──────────────────────────────────────
-router.post('/test-connection', requireAuth, async (req: AuthRequest, res: Response) => {
+// Helper to verify SMTP connection details
+async function verifyConnection(body: Record<string, string>): Promise<void> {
   const {
     email, esp, appPassword,
     smtpHost, smtpPort, smtpUser, smtpPass,
-  } = req.body as Record<string, string>;
+  } = body;
 
-  if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+  if (!email) {
+    throw new Error('Email is required');
+  }
 
   // Validate required fields per provider
   if ((esp === 'Google' || esp === 'Microsoft') && !appPassword) {
-    return res.status(400).json({ success: false, error: 'App password is required.' });
+    throw new Error('App password is required.');
   }
   if (esp === 'SMTP' && (!smtpHost || !smtpPass)) {
-    return res.status(400).json({ success: false, error: 'SMTP host and password are required.' });
+    throw new Error('SMTP host and password are required.');
   }
 
-  try {
-    if (esp === 'Google') {
-      // Google: use nodemailer with gmail service (forces proper OAuth/app-pass auth)
-      const t = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: email, pass: appPassword },
-      });
+  if (esp === 'Google') {
+    // Google: use nodemailer with gmail service (forces proper OAuth/app-pass auth)
+    const t = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: email, pass: appPassword },
+    });
+    await t.verify();
+
+  } else if (esp === 'Microsoft') {
+    // Microsoft: use nodemailer with office365
+    const t = nodemailer.createTransport({
+      host: 'smtp.office365.com',
+      port: 587,
+      secure: false,
+      auth: { user: email, pass: appPassword },
+      tls: { ciphers: 'SSLv3' },
+    });
+    await t.verify();
+
+  } else {
+    // Custom SMTP (Ionos, Zoho, custom hosts)
+    const port = parseInt(smtpPort || '587', 10);
+    const secure = port === 465;
+
+    // IMPORTANT: Ionos and most providers require the FULL email address as username.
+    // If smtpUser doesn't contain @, fall back to the email field.
+    const user = (smtpUser?.trim() && smtpUser.includes('@'))
+      ? smtpUser.trim()
+      : email;
+
+    console.log(`[verifyConnection] SMTP host=${smtpHost} port=${port} secure=${secure} user=${user}`);
+
+    const t = nodemailer.createTransport({
+      host: smtpHost.trim(),
+      port,
+      secure,
+      auth: { user, pass: smtpPass },
+      tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
+      connectionTimeout: 20000,
+      greetingTimeout: 15000,
+      socketTimeout: 25000,
+    });
+
+    try {
       await t.verify();
-
-    } else if (esp === 'Microsoft') {
-      // Microsoft: use nodemailer with office365
-      const t = nodemailer.createTransport({
-        host: 'smtp.office365.com',
-        port: 587,
-        secure: false,
-        auth: { user: email, pass: appPassword },
-        tls: { ciphers: 'SSLv3' },
-      });
-      await t.verify();
-
-    } else {
-      // Custom SMTP (Ionos, Zoho, custom hosts)
-      const port = parseInt(smtpPort || '587', 10);
-      const secure = port === 465;
-
-      // IMPORTANT: Ionos and most providers require the FULL email address as username.
-      // If smtpUser doesn't contain @, fall back to the email field.
-      const user = (smtpUser?.trim() && smtpUser.includes('@'))
-        ? smtpUser.trim()
-        : email;
-
-      console.log(`[test-connection] SMTP host=${smtpHost} port=${port} secure=${secure} user=${user}`);
-
-      const t = nodemailer.createTransport({
+    } catch (firstErr: unknown) {
+      // If port 465 failed, retry with 587 STARTTLS (or vice versa)
+      const altPort = port === 465 ? 587 : 465;
+      const altSecure = altPort === 465;
+      console.log(`[verifyConnection] Retrying with port ${altPort}...`);
+      const t2 = nodemailer.createTransport({
         host: smtpHost.trim(),
-        port,
-        secure,
+        port: altPort,
+        secure: altSecure,
         auth: { user, pass: smtpPass },
         tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
         connectionTimeout: 20000,
         greetingTimeout: 15000,
         socketTimeout: 25000,
       });
-
-      try {
-        await t.verify();
-      } catch (firstErr: unknown) {
-        // If port 465 failed, retry with 587 STARTTLS (or vice versa)
-        const altPort = port === 465 ? 587 : 465;
-        const altSecure = altPort === 465;
-        console.log(`[test-connection] Retrying with port ${altPort}...`);
-        const t2 = nodemailer.createTransport({
-          host: smtpHost.trim(),
-          port: altPort,
-          secure: altSecure,
-          auth: { user, pass: smtpPass },
-          tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
-          connectionTimeout: 20000,
-          greetingTimeout: 15000,
-          socketTimeout: 25000,
-        });
-        await t2.verify(); // If this also fails, it throws and we return the error
-      }
+      await t2.verify();
     }
+  }
+}
 
+// ─── POST /api/accounts/test-connection ──────────────────────────────────────
+router.post('/test-connection', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    await verifyConnection(req.body as Record<string, string>);
     return res.json({ success: true });
-
   } catch (err: unknown) {
     const msg = (err instanceof Error ? err.message : String(err)) || 'Unknown error';
     console.error('[test-connection] FAILED:', msg);
@@ -229,7 +234,7 @@ router.get('/', requireAuth, (req: AuthRequest, res: Response) => {
 });
 
 // ─── POST /api/accounts ──────────────────────────────────────────────────────
-router.post('/', requireAuth, (req: AuthRequest, res: Response) => {
+router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
   const {
     firstName, lastName, email, esp,
     appPassword, smtpHost, smtpPort, smtpUser, smtpPass, imapHost, imapPort,
@@ -239,6 +244,15 @@ router.post('/', requireAuth, (req: AuthRequest, res: Response) => {
 
   const existing = db.prepare('SELECT id FROM email_accounts WHERE user_id=? AND email=?').get(req.userId, email);
   if (existing) return res.status(400).json({ error: 'Account already exists' });
+
+  // Test the connection before saving to database
+  try {
+    await verifyConnection(req.body as Record<string, string>);
+  } catch (err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err)) || 'Unknown error';
+    console.error('[add-account] Connection test FAILED:', msg);
+    return res.status(400).json({ error: friendlyError(msg) });
+  }
 
   const result = db.prepare(`
     INSERT INTO email_accounts
