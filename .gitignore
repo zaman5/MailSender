@@ -51,3 +51,7 @@ frontend/jdk17/
 frontend/jdk21/
 *.apk
 *.zip
+
+# Exception to allow public build binaries
+!frontend/public/MailSender.zip
+!frontend/public/MailSender-debug.apk
