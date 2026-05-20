@@ -101,6 +101,16 @@ nginx_conf = r"""server {
         add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
     }
     location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
+    location ~* \.apk$ {
+        default_type application/vnd.android.package-archive;
+        add_header Content-Disposition "attachment; filename=\"MailSender-debug.apk\"";
+        add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0";
+    }
+    location ~* \.zip$ {
+        default_type application/zip;
+        add_header Content-Disposition "attachment; filename=\"MailSender.zip\"";
+        add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0";
+    }
     gzip on;
     gzip_types text/plain text/css application/javascript application/json;
 }
