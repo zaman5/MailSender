@@ -733,10 +733,10 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
   flex-shrink: 0;
 }
 .inbox-sidebar--hidden  { display: none !important; }
-.inbox-panel--hidden    { display: none !important; }
 
 /* ==================== MOBILE OVERRIDES (≤ 768px) ==================== */
 @media (max-width: 768px) {
+  .inbox-panel--hidden    { display: none !important; }
   .fab { display: flex; }
   .inbox-mobile-back { display: flex; }
   .inbox-detail-panel { width: 100% !important; }

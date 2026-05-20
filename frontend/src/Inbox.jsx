@@ -210,6 +210,7 @@ export default function Inbox({ userId }) {
   /* ── On folder switch: show cache instantly, then incremental sync ── */
   useEffect(() => {
     setActive(null);
+    setMobileShowDetail(false);
     const cached = getCached(folder);
     if (cached) {
       // Restore cache immediately — no API call, no spinner
@@ -620,7 +621,7 @@ export default function Inbox({ userId }) {
       />
 
       {/* ── RIGHT PANEL ── */}
-      <div className={`inbox-detail-panel${mobileShowDetail ? '' : ''}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-primary)' }}>
+      <div className={`inbox-detail-panel${!mobileShowDetail ? ' inbox-panel--hidden' : ''}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-primary)' }}>
         {/* Mobile back button */}
         {mobileShowDetail && (
           <div className="inbox-mobile-back">

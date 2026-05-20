@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MailSender</string>
+    <string name="title_activity_main">MailSender</string>
+    <string name="package_name">com.mailsender.app</string>
+    <string name="custom_url_scheme">com.mailsender.app</string>
+</resources>

@@ -1,0 +1,12 @@
+{
+  "appId": "com.mailsender.app",
+  "appName": "MailSender",
+  "webDir": "dist",
+  "server": {
+    "url": "http://74.208.48.167",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
