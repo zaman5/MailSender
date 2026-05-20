@@ -136,13 +136,6 @@ export default function CampaignSchedule({ campaign }) {
     });
   }, [campaign?.id]);
 
-  async function saveSchedule() {
-    setSaving(true);
-    await api.post(`/campaigns/${campaign.id}/schedule`, data);
-    setSaving(false); setSaved(true); showToast('Schedule saved ✅');
-    setTimeout(() => setSaved(false), 2500);
-  }
-
   // Save both schedule + updated sequence wait days
   async function saveSchedule() {
     setSaving(true);
@@ -214,7 +207,7 @@ export default function CampaignSchedule({ campaign }) {
               {TIMEZONES.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
+          <div className="schedule-grid-2">
             <div className="form-group">
               <label className="form-label">Daily start time</label>
               <TimePicker value={data.startTime} onChange={v => setV('startTime', v)} />
@@ -226,7 +219,7 @@ export default function CampaignSchedule({ campaign }) {
               <span className="fs-xs text-muted">Type hour &amp; minute, click AM/PM to toggle</span>
             </div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
+          <div className="schedule-grid-2">
             <div className="form-group">
               <label className="form-label">Campaign start date</label>
               <input type="date" className="form-input" value={data.startDate} onChange={set('startDate')} />

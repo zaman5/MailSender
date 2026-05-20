@@ -241,6 +241,7 @@ export default function Prospects() {
       setLists(prev => prev.map(l => l.id === selectedList.id ? res : l));
       setSelectedList(res);
       setPasteEmails('');
+      setImportModal(false);  // close modal on success
       showToast(`${rawLeads.length} lead${rawLeads.length !== 1 ? 's' : ''} imported successfully`);
     } else {
       throw new Error(res?.error || 'Failed to import leads');
@@ -265,7 +266,7 @@ export default function Prospects() {
         setImportError('No valid emails found. Make sure your file has an "email" column.');
         return;
       }
-      importLeads(leads);
+      importLeads(leads).catch(err => setImportError(err.message || 'Import failed'));
     }
 
     if (isExcel) {
@@ -315,7 +316,11 @@ export default function Prospects() {
     const emails = pasteEmails.split(/[\n,;]+/).map(e => e.trim()).filter(e => e.includes('@'));
     if (!emails.length) { setImportError('No valid emails found.'); return; }
     const leads = emails.map(email => ({ email, name: '', company: '', phone: '' }));
-    await importLeads(leads);
+    try {
+      await importLeads(leads);
+    } catch (err) {
+      setImportError(err.message || 'Import failed');
+    }
   }
 
   // ── Computed values ───────────────────────────────────────

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from './api';
-import { setUnreadCount } from './inboxStore';
+import { setUnreadCount, publishUnread } from './inboxStore';
 
 // ── Module-level cache: survives React re-renders and navigation ──────────────
 // Structure: { emails: [], accounts: [], newestDate: ISO|null, syncedAt: Date|null }
@@ -74,6 +74,7 @@ export default function Inbox({ userId }) {
   const [threadEmails, setThreadEmails] = useState([]);
   const [midWidth, setMidWidth]   = useState(320);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileShowDetail, setMobileShowDetail] = useState(false);
   const [showReply, setShowReply]   = useState(false);
   const [expandedMsgIds, setExpandedMsgIds] = useState(new Set());
   const [showAllMessages, setShowAllMessages] = useState(false);
@@ -425,8 +426,8 @@ export default function Inbox({ userId }) {
   const unreadCount = enriched.filter(e => e.unread && !e.isSelfSent).length;
 
   // Publish live count to App sidebar badge
-  useEffect(() => { setUnreadCount(unreadCount); }, [unreadCount]);
-  useEffect(() => () => setUnreadCount(0), []); // clear on unmount
+  useEffect(() => { setUnreadCount(unreadCount); publishUnread(unreadCount); }, [unreadCount]);
+  useEffect(() => () => { setUnreadCount(0); publishUnread(0); }, []); // clear on unmount
 
   return (
     <div
@@ -519,7 +520,7 @@ export default function Inbox({ userId }) {
       </div>
 
       {/* ── MIDDLE PANEL ── */}
-      <div style={{ width: midWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className={`inbox-list-panel${mobileShowDetail ? ' inbox-panel--hidden' : ''}`} style={{ width: midWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '0.875rem 1rem', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
             <span style={{ fontWeight: 700, fontSize: '0.92rem' }}>
@@ -569,7 +570,7 @@ export default function Inbox({ userId }) {
                 const t = thread.latest;
                 const isActive = active?.id === t.id;
                 return (
-                  <div key={thread.key} onClick={() => openThread(thread)}
+                  <div key={thread.key} onClick={() => { openThread(thread); setMobileShowDetail(true); }}
                     style={{ padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: isActive ? '3px solid var(--accent-primary)' : '3px solid transparent', transition: 'background 0.12s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.3rem' }}>
                       <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -619,7 +620,15 @@ export default function Inbox({ userId }) {
       />
 
       {/* ── RIGHT PANEL ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-primary)' }}>
+      <div className={`inbox-detail-panel${mobileShowDetail ? '' : ''}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-primary)' }}>
+        {/* Mobile back button */}
+        {mobileShowDetail && (
+          <div className="inbox-mobile-back">
+            <button className="btn btn-secondary btn-sm" onClick={() => { setMobileShowDetail(false); setActive(null); }}>
+              ← Back to Inbox
+            </button>
+          </div>
+        )}
         {!active ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             <div style={{ fontSize: '4rem', marginBottom: '1rem', opacity: 0.2 }}>✉️</div>

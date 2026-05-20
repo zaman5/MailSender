@@ -95,36 +95,43 @@ export default function Campaigns({ userId }) {
 
       <div className="card" style={{ overflow:'hidden' }}>
         {loading ? <div style={{ padding:'3rem', textAlign:'center', color:'var(--text-muted)' }}>Loading…</div> : (
-          <table className="data-table">
-            <thead>
-              <tr><th>Campaign</th><th>Status</th><th>Prospects</th><th>Sent</th><th>Open %</th><th>Reply %</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {filtered.map(c => (
-                <tr key={c.id} style={{ cursor:'pointer' }} onClick={() => setSelected(c)}>
-                  <td><div style={{ fontWeight:500 }}>{c.name}</div><div className="fs-xs text-muted">Created {c.created_at?.slice(0,10)}</div></td>
-                  <td><span className={`badge ${statusMap[c.status]?.cls || 'badge-default'}`}>{statusMap[c.status]?.label || c.status}</span></td>
-                  <td className="col-num">{(c.prospects||0).toLocaleString()}</td>
-                  <td className="col-num">{(c.sent||0).toLocaleString()}</td>
-                  <td><span className={pct(c.opens,c.sent)!=='—'?'text-info':'text-muted'}>{pct(c.opens,c.sent)}</span></td>
-                  <td><span className={pct(c.replies,c.sent)!=='—'?'text-success':'text-muted'}>{pct(c.replies,c.sent)}</span></td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <div className="flex-row" style={{ gap:'0.5rem' }}>
-                      {(c.status==='active'||c.status==='paused') && (
-                        <button className={`btn btn-sm ${c.status==='active'?'btn-secondary':'btn-success'}`} onClick={() => { toggleStatus(c.id); showToast(c.status==='active'?'Campaign paused':'Campaign resumed'); }}>
-                          {c.status==='active'?'⏸':'▶'}
-                        </button>
-                      )}
-                      <button className="btn btn-sm btn-danger" onClick={() => deleteCampaign(c.id)}>🗑</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && <tr><td colSpan={7} style={{ textAlign:'center', padding:'2.5rem', color:'var(--text-muted)' }}>{loading ? 'Loading…' : 'No campaigns found.'}</td></tr>}
-            </tbody>
-          </table>
+          <div className="table-scroll-x">
+            <table className="data-table">
+              <thead>
+                <tr><th>Campaign</th><th>Status</th><th>Prospects</th><th>Sent</th><th>Open %</th><th>Reply %</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {filtered.map(c => (
+                  <tr key={c.id} style={{ cursor:'pointer' }} onClick={() => setSelected(c)}>
+                    <td><div style={{ fontWeight:500 }}>{c.name}</div><div className="fs-xs text-muted">Created {c.created_at?.slice(0,10)}</div></td>
+                    <td><span className={`badge ${statusMap[c.status]?.cls || 'badge-default'}`}>{statusMap[c.status]?.label || c.status}</span></td>
+                    <td className="col-num">{(c.prospects||0).toLocaleString()}</td>
+                    <td className="col-num">{(c.sent||0).toLocaleString()}</td>
+                    <td><span className={pct(c.opens,c.sent)!=='—'?'text-info':'text-muted'}>{pct(c.opens,c.sent)}</span></td>
+                    <td><span className={pct(c.replies,c.sent)!=='—'?'text-success':'text-muted'}>{pct(c.replies,c.sent)}</span></td>
+                    <td onClick={e => e.stopPropagation()}>
+                      <div className="flex-row" style={{ gap:'0.5rem' }}>
+                        {(c.status==='active'||c.status==='paused') && (
+                          <button className={`btn btn-sm ${c.status==='active'?'btn-secondary':'btn-success'}`} onClick={() => { toggleStatus(c.id); showToast(c.status==='active'?'Campaign paused':'Campaign resumed'); }}>
+                            {c.status==='active'?'⏸':'▶'}
+                          </button>
+                        )}
+                        <button className="btn btn-sm btn-danger" onClick={() => deleteCampaign(c.id)}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && <tr><td colSpan={7} style={{ textAlign:'center', padding:'2.5rem', color:'var(--text-muted)' }}>{loading ? 'Loading…' : 'No campaigns found.'}</td></tr>}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
+
+      {/* Mobile FAB — visible only on mobile (header button is hidden there) */}
+      <button className="fab" onClick={() => setShowModal(true)} aria-label="New Campaign">
+        +
+      </button>
 
       {showModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>

@@ -673,3 +673,83 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
   .sidebar-footer { display: none; } /* hide warmup widget in sidebar on very small screens */
 }
 
+
+/* ==================== CAMPAIGN TAB SCROLL ==================== */
+.campaign-tab-bar { overflow: hidden; }
+.campaign-tab-scroll {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.campaign-tab-scroll::-webkit-scrollbar { display: none; }
+
+/* ==================== STATS GRID (Analytics) ==================== */
+.stats-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+}
+
+/* ==================== SCHEDULE 2-COL GRID ==================== */
+.schedule-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+/* ==================== FLOATING ACTION BUTTON (mobile only) ==================== */
+.fab {
+  display: none;
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: white;
+  font-size: 1.8rem;
+  font-weight: 300;
+  line-height: 1;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgba(99,102,241,0.5);
+  z-index: 80;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.fab:hover { transform: scale(1.08); box-shadow: 0 8px 28px rgba(99,102,241,0.65); }
+
+/* ==================== INBOX MOBILE PANE ==================== */
+.inbox-mobile-back {
+  display: none;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+.inbox-sidebar--hidden  { display: none !important; }
+.inbox-panel--hidden    { display: none !important; }
+
+/* ==================== MOBILE OVERRIDES (≤ 768px) ==================== */
+@media (max-width: 768px) {
+  .fab { display: flex; }
+  .inbox-mobile-back { display: flex; }
+  .inbox-detail-panel { width: 100% !important; }
+  .inbox-list-panel   { width: 100% !important; border-right: none !important; }
+  .tab-status-label   { display: none; }
+  .stats-grid-4  { grid-template-columns: 1fr 1fr; }
+  .schedule-grid-2 { grid-template-columns: 1fr; }
+  .page-content { overflow-y: auto; }
+}
+
+/* ==================== SMALL MOBILE (≤ 480px) ==================== */
+@media (max-width: 480px) {
+  .stats-grid-4 { gap: 0.5rem; }
+  .tab-label-text { display: none; }
+  .fab { bottom: 16px; right: 16px; width: 50px; height: 50px; font-size: 1.5rem; }
+}

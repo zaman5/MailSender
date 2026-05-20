@@ -36,14 +36,14 @@ export default function Dashboard({ onNavigate }) {
 
   // Dynamic stats array using real data if available
   const statsList = [
-    { label: 'Active Campaigns', value: liveStats?.activeCampaigns ?? '0', trend: `${liveStats?.totalCampaigns ?? 0} total`, dir: 'neutral', icon: '📢', color: '#818cf8' },
-    { label: 'Emails Sent', value: (liveStats?.sent ?? 0).toLocaleString(), trend: 'All time', dir: 'up', icon: '📤', color: '#06b6d4' },
-    { label: 'Avg Open Rate', value: `${liveStats?.openRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '👁', color: '#10b981' },
-    { label: 'Reply Rate', value: `${liveStats?.replyRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '💬', color: '#f59e0b' },
-    { label: 'Prospects', value: (liveStats?.prospects ?? 0).toLocaleString(), trend: 'Total in DB', dir: 'up', icon: '👥', color: '#ec4899' },
-    { label: 'Email Accounts', value: liveStats?.warmupAccounts?.length ?? 0, trend: 'Connected', dir: 'neutral', icon: '📬', color: '#10b981' },
-    { label: 'Deliverability', value: '96.2%', trend: 'Excellent', dir: 'neutral', icon: '✅', color: '#10b981' },
-    { label: 'Bounce Rate', value: `${liveStats?.bounceRate ?? '0.0'}%`, trend: 'Avg: <2%', dir: liveStats?.bounceRate > 2 ? 'down' : 'up', icon: '⚡', color: '#6366f1' },
+    { label: 'Active Campaigns', value: liveStats?.activeCampaigns ?? '—', trend: `${liveStats?.totalCampaigns ?? 0} total`, dir: 'neutral', icon: '📢', color: '#818cf8' },
+    { label: 'Emails Sent',      value: (liveStats?.sent ?? 0).toLocaleString(), trend: 'All time', dir: 'up', icon: '📤', color: '#06b6d4' },
+    { label: 'Avg Open Rate',    value: `${liveStats?.openRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '👁', color: '#10b981' },
+    { label: 'Reply Rate',       value: `${liveStats?.replyRate ?? '0.0'}%`, trend: 'All time', dir: 'up', icon: '💬', color: '#f59e0b' },
+    { label: 'Prospects',        value: (liveStats?.prospects ?? 0).toLocaleString(), trend: 'Total in DB', dir: 'up', icon: '👥', color: '#ec4899' },
+    { label: 'Email Accounts',   value: liveStats?.accountsCount ?? (liveStats?.warmupAccounts?.length ?? 0), trend: 'Connected', dir: 'neutral', icon: '📬', color: '#10b981' },
+    { label: 'Deliverability',   value: '96.2%', trend: 'Excellent', dir: 'neutral', icon: '✅', color: '#10b981' },
+    { label: 'Bounce Rate',      value: `${liveStats?.bounceRate ?? '0.0'}%`, trend: 'Avg: <2%', dir: liveStats?.bounceRate > 2 ? 'down' : 'up', icon: '⚡', color: '#6366f1' },
   ];
 
   return (

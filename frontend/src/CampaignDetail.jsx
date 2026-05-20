@@ -162,36 +162,38 @@ export default function CampaignDetail({ campaign, onBack, onToggleStatus }) {
       </div>
 
       {/* Tab Bar */}
-      <div className="card" style={{ padding:'0 0.75rem', display:'flex', alignItems:'center', gap:0, marginBottom:'0.75rem', overflow:'hidden', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', paddingRight:'1rem', borderRight:'1px solid var(--border-color)', marginRight:'0.25rem', flexShrink:0 }}>
-          <div style={{ width:8, height:8, borderRadius:'50%', background: active ? 'var(--success)' : '#f59e0b', flexShrink:0 }} />
-          <span style={{ fontWeight:600, fontSize:'0.85rem', whiteSpace:'nowrap', maxWidth:120, overflow:'hidden', textOverflow:'ellipsis' }}>{campaign.name}</span>
-          <span style={{ fontSize:'0.72rem', color:'var(--text-muted)', whiteSpace:'nowrap' }}>{active ? 'Active' : 'Paused'}</span>
-          <div onClick={toggleCampaign}
-            style={{ width:32, height:18, borderRadius:99, cursor:'pointer',
-              background: active ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-              border:`2px solid ${active ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-              position:'relative', transition:'all 0.2s', flexShrink:0 }}>
-            <div style={{ position:'absolute', top:1, left: active ? 12 : 1, width:12, height:12, borderRadius:'50%', background:'#fff', transition:'left 0.2s' }} />
+      <div className="card campaign-tab-bar" style={{ padding:'0 0.75rem', marginBottom:'0.75rem', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:0, overflow:'hidden' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', paddingRight:'1rem', borderRight:'1px solid var(--border-color)', marginRight:'0.25rem', flexShrink:0 }}>
+            <div style={{ width:8, height:8, borderRadius:'50%', background: active ? 'var(--success)' : '#f59e0b', flexShrink:0 }} />
+            <span style={{ fontWeight:600, fontSize:'0.85rem', whiteSpace:'nowrap', maxWidth:100, overflow:'hidden', textOverflow:'ellipsis' }}>{campaign.name}</span>
+            <span className="tab-status-label" style={{ fontSize:'0.72rem', color:'var(--text-muted)', whiteSpace:'nowrap' }}>{active ? 'Active' : 'Paused'}</span>
+            <div onClick={toggleCampaign}
+              style={{ width:32, height:18, borderRadius:99, cursor:'pointer',
+                background: active ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                border:`2px solid ${active ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                position:'relative', transition:'all 0.2s', flexShrink:0 }}>
+              <div style={{ position:'absolute', top:1, left: active ? 12 : 1, width:12, height:12, borderRadius:'50%', background:'#fff', transition:'left 0.2s' }} />
+            </div>
           </div>
+          <div className="campaign-tab-scroll">
+            {TABS.map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                style={{ background:'none', border:'none',
+                  borderBottom: tab===t ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  color: tab===t ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  padding:'0.85rem 0.6rem', cursor:'pointer', fontWeight: tab===t ? 600 : 400,
+                  fontSize:'0.8rem', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:'0.25rem',
+                  transition:'color 0.15s', flexShrink:0 }}>
+                {TAB_ICONS[t]} <span className="tab-label-text">{t}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={onBack} className="btn btn-secondary btn-sm"
+            style={{ marginLeft:'0.5rem', flexShrink:0, whiteSpace:'nowrap', fontSize:'0.78rem', padding:'5px 10px' }}>
+            ← Back
+          </button>
         </div>
-        <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-          {TABS.map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              style={{ background:'none', border:'none',
-                borderBottom: tab===t ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                color: tab===t ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                padding:'0.85rem 0.6rem', cursor:'pointer', fontWeight: tab===t ? 600 : 400,
-                fontSize:'0.8rem', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:'0.25rem',
-                transition:'color 0.15s', flexShrink:0 }}>
-              {TAB_ICONS[t]} {t}
-            </button>
-          ))}
-        </div>
-        <button onClick={onBack} className="btn btn-secondary btn-sm"
-          style={{ marginLeft:'0.5rem', flexShrink:0, whiteSpace:'nowrap', fontSize:'0.78rem', padding:'5px 10px' }}>
-          ← Back
-        </button>
       </div>
 
       {/* ── Sending status strip ── */}
@@ -262,7 +264,7 @@ export default function CampaignDetail({ campaign, onBack, onToggleStatus }) {
               )}
 
               {/* Stats grid */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'0.85rem' }}>
+              <div className="stats-grid-4">
                 <StatCard icon="📤" label="Emails Sent"          value={stats.sent}       color="var(--accent-primary)" />
                 <StatCard icon="👥" label="Total Leads"          value={stats.totalLeads} color="#818cf8" />
                 <StatCard icon="✅" label="Completed Leads"      value={stats.completed}  color="var(--success)" />
