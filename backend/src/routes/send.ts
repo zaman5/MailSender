@@ -150,7 +150,7 @@ router.post('/campaign/:id/activate', requireAuth, async (req: AuthRequest, res:
   });
 });
 
-import { isCampaignWithinSchedule } from '../utils/schedule';
+import { isCampaignWithinSchedule, getLocalMidnightTimestamp, parseTime } from '../utils/schedule';
 
 // ─── Main Sending Engine ─────────────────────────────────────────────────────
 
@@ -192,6 +192,32 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
     ? parseFloat(schedule.customInterval || '2') * (schedule.customUnit === 'seconds' ? 1000 : schedule.customUnit === 'hours' ? 3600000 : 60000)
     : 0;
 
+  const rawTz = schedule.timezone || 'UTC';
+  const tzParts = rawTz.split(' ');
+  const tz = tzParts[0]; // e.g., 'Asia/Karachi'
+  const midnightToday = getLocalMidnightTimestamp(tz);
+
+  // Check how many emails sent today
+  const sentTodayRow = db.prepare('SELECT COUNT(*) as count FROM campaign_sends WHERE campaign_id = ? AND sent_at >= ?').get(campaignId, midnightToday) as any;
+  const sentToday = sentTodayRow?.count || 0;
+  const remainingEmailsToday = Math.max(0, maxEmails - sentToday);
+
+  if (remainingEmailsToday <= 0) {
+    return { started: false, message: `Daily sending limit of ${maxEmails} emails reached for today.` };
+  }
+
+  // Check how many new leads sent today
+  const maxLeadsStr = schedule.maxLeads;
+  const maxLeads = maxLeadsStr && maxLeadsStr.trim() !== '' ? parseInt(maxLeadsStr, 10) : Infinity;
+
+  const newLeadsSentTodayRow = db.prepare(`
+    SELECT COUNT(*) as count FROM campaign_sends 
+    WHERE campaign_id = ? AND step_index = 0 AND sent_at >= ?
+  `).get(campaignId, midnightToday) as any;
+  const newLeadsSentToday = newLeadsSentTodayRow?.count || 0;
+
+  let remainingNewLeadsToday = Math.max(0, maxLeads - newLeadsSentToday);
+
   const sigRow    = db.prepare('SELECT signature FROM user_settings WHERE user_id=?').get(userId) as any;
   const signature = sigRow?.signature || '';
 
@@ -207,11 +233,9 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
   const unsubLink    = safety.unsubLink ?? false;
 
   // ── Get only leads that STILL have pending steps ──────────────────────────
-  // Key fix: filter by step_index < total steps to prevent resending completed leads
-  // and ensure next_step_at is either 0 or in the past
   const totalSteps = steps.length;
   const now = Date.now();
-  const leads: any[] = (db.prepare(`
+  const candidates: any[] = (db.prepare(`
     SELECT * FROM campaign_leads
     WHERE campaign_id=?
       AND status NOT IN ('Bounced', 'Completed', 'Replied')
@@ -223,12 +247,30 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
         -- Follow-up steps: only ready when next_step_at was explicitly set AND is in the past
         (step_index > 0 AND next_step_at IS NOT NULL AND next_step_at > 0 AND next_step_at <= ?)
       )
-    ORDER BY created_at ASC
-    LIMIT ?
-  `).all(campaignId, totalSteps, now, maxEmails) as any[]);
+    ORDER BY step_index DESC, created_at ASC
+  `).all(campaignId, totalSteps, now) as any[]);
+
+  // Filter in memory to respect limits & prioritize follow-up steps
+  const leads: any[] = [];
+  let newLeadsCount = 0;
+
+  for (const lead of candidates) {
+    if (leads.length >= remainingEmailsToday) {
+      break;
+    }
+    const stepIdx = lead.step_index ?? 0;
+    if (stepIdx === 0) {
+      if (newLeadsCount < remainingNewLeadsToday) {
+        leads.push(lead);
+        newLeadsCount++;
+      }
+    } else {
+      leads.push(lead);
+    }
+  }
 
   if (!leads.length) {
-    return { started: false, message: 'All leads have been contacted. No pending leads remaining.' };
+    return { started: false, message: 'All leads have been contacted or daily limits reached. No pending leads remaining for today.' };
   }
 
   // ── Background Execution Context ───────────────────────────────────────────
@@ -246,9 +288,9 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
   // Launch async worker
   (async () => {
   try {
-    let baseDelayMs = 0;
+    let baseDelayMs = 2000;
     if (deliveryMode === 'quick') {
-      baseDelayMs = 2000;
+      baseDelayMs = Math.max(1000, (quickMinutes * 60 * 1000) / Math.max(1, maxEmails));
     } else if (deliveryMode === 'custom') {
       baseDelayMs = customMs;
     }
@@ -263,6 +305,13 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
       if (stepIdx >= totalSteps) {
         db.prepare("UPDATE campaign_leads SET status='Completed' WHERE id=?").run(lead.id);
         continue;
+      }
+
+      // Re-verify campaign is within its schedule window before sending each email
+      const windowCheck = isCampaignWithinSchedule(seqRow?.schedule_json);
+      if (!windowCheck.allowed) {
+        console.log(`[Campaign ${campaignId}] Out of schedule window: ${windowCheck.reason}. Suspending batch.`);
+        break;
       }
 
       const step      = steps[stepIdx];
@@ -290,10 +339,37 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
 
       // Delay between emails
       if (i > 0) {
-        const wait = deliveryMode === 'random'
-          ? Math.floor(Math.random() * 4000) + 2000  // 2–6s in dev
-          : baseDelayMs;
-        if (wait > 0) await sleep(wait);
+        let wait = baseDelayMs;
+        if (deliveryMode === 'random') {
+          // Re-calculate remaining minutes and remaining emails to send today to be dynamically self-adjusting
+          const freshSched = db.prepare('SELECT schedule_json FROM campaign_sequences WHERE campaign_id=?').get(campaignId) as any;
+          const currentSchedule = freshSched?.schedule_json ? JSON.parse(freshSched.schedule_json) : {};
+          const currentMaxEmails = parseInt(currentSchedule.maxEmails || '100');
+          
+          const freshSentTodayRow = db.prepare('SELECT COUNT(*) as count FROM campaign_sends WHERE campaign_id = ? AND sent_at >= ?').get(campaignId, midnightToday) as any;
+          const freshSentToday = freshSentTodayRow?.count || 0;
+          const freshRemainingEmails = Math.max(1, currentMaxEmails - freshSentToday);
+          
+          // Re-calculate remaining minutes
+          const freshParts = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+          }).formatToParts(new Date());
+          const fp: Record<string, string> = {};
+          for (const part of freshParts) fp[part.type] = part.value;
+          const freshCurrentMinutes = parseInt(fp.hour, 10) * 60 + parseInt(fp.minute, 10);
+          const freshEndMins = parseTime(currentSchedule.endTime || '6:00 PM');
+          const freshRemainingMins = Math.max(1, freshEndMins - freshCurrentMinutes);
+          
+          const avgIntervalMs = (freshRemainingMins * 60 * 1000) / freshRemainingEmails;
+          const minDelay = avgIntervalMs * 0.3;
+          const maxDelay = avgIntervalMs * 1.0;
+          wait = Math.max(2000, Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay);
+        }
+        if (wait > 0) {
+          console.log(`[Campaign ${campaignId}] Waiting ${Math.round(wait / 1000)}s before next send...`);
+          await sleep(wait);
+        }
       }
 
       // Re-check campaign is still active before each send
@@ -342,12 +418,20 @@ export async function runCampaignEngine(campaignId: string, userId: number, reqO
         // ── Campaign-level counter ──
         db.prepare('UPDATE campaigns SET sent=sent+1 WHERE id=?').run(campaignId);
 
+        // ── Record send in campaign_sends ──
+        db.prepare('INSERT INTO campaign_sends (campaign_id, account_id, lead_id, step_index, sent_at) VALUES (?, ?, ?, ?, ?)')
+          .run(campaignId, account.id, lead.id, stepIdx, Date.now());
+
         console.log(`[Campaign ${campaignId}] ✅ Step ${stepIdx + 1}/${totalSteps} → ${lead.email} (${account.email})`);
 
     } catch (err: any) {
         console.error(`[Campaign ${campaignId}] ❌ Failed ${lead.email}: ${err?.message}`);
         db.prepare("UPDATE campaign_leads SET status='Bounced' WHERE id=?").run(lead.id);
         db.prepare('UPDATE campaigns SET bounced=bounced+1 WHERE id=?').run(campaignId);
+
+        // ── Record send in campaign_sends for failed attempts too ──
+        db.prepare('INSERT INTO campaign_sends (campaign_id, account_id, lead_id, step_index, sent_at) VALUES (?, ?, ?, ?, ?)')
+          .run(campaignId, account.id, lead.id, stepIdx, Date.now());
 
         // Auto-pause if bounce rate exceeds threshold
         const stats = db.prepare('SELECT sent, bounced, settings_json FROM campaigns WHERE id=?').get(campaignId) as any;

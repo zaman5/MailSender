@@ -86,3 +86,42 @@ export function isCampaignWithinSchedule(scheduleJson: string | null | undefined
 
   return { allowed: true, reason: 'Inside window' };
 }
+
+export function getTimezoneOffset(timeZone: string, date: Date = new Date()): number {
+  const tzString = date.toLocaleString('en-US', { timeZone, timeZoneName: 'longOffset' });
+  const match = tzString.match(/[+-]\d{1,2}(:\d{2})?$/);
+  if (match) {
+    const sign = match[0][0] === '+' ? 1 : -1;
+    const parts = match[0].slice(1).split(':');
+    const hours = parseInt(parts[0], 10);
+    const minutes = parts[1] ? parseInt(parts[1], 10) : 0;
+    return sign * (hours * 60 + minutes) * 60 * 1000;
+  }
+  return 0;
+}
+
+export function getLocalMidnightTimestamp(tz: string): number {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(new Date());
+  } catch (e) {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  const p: Record<string, string> = {};
+  for (const part of parts) {
+    p[part.type] = part.value;
+  }
+
+  const utcDate = new Date(`${p.year}-${p.month}-${p.day}T00:00:00Z`);
+  const offset = getTimezoneOffset(tz, utcDate);
+  return utcDate.getTime() - offset;
+}
+

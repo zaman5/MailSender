@@ -186,6 +186,17 @@ db.exec(`
     synced_at INTEGER DEFAULT 0,
     UNIQUE(user_id, account_id, folder, uid)
   );
+  CREATE TABLE IF NOT EXISTS campaign_sends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    lead_id INTEGER NOT NULL,
+    step_index INTEGER NOT NULL DEFAULT 0,
+    sent_at INTEGER NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES email_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (lead_id) REFERENCES campaign_leads(id) ON DELETE CASCADE
+  );
 `);
 
 // ── Migration: rebuild inbox_cache with user_id in UNIQUE constraint ──────────
