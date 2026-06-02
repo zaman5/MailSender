@@ -110,6 +110,40 @@ function stripHtml(html: string): string {
 function extractCleanBody(raw: string): { html: string, text: string } {
   if (!raw || !raw.trim()) return { html: '', text: '' };
 
+  // Helper for recursive multipart parsing
+  function parseMultipart(bodySection: string, boundary: string): { html: string, plain: string } {
+    const escaped  = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts    = bodySection.split(new RegExp(`--${escaped}(?:--)?`));
+    let html = '';
+    let plain = '';
+
+    for (const part of parts) {
+      const pb = part.search(/\r?\n\r?\n/);
+      if (pb < 0) continue;
+      const ph  = part.slice(0, pb).replace(/\r?\n[ \t]+/g, ' '); // unfold
+      const pct = (ph.match(/Content-Type:\s*([^;\r\n]+)/i)?.[1] || '').trim().toLowerCase();
+      const pce = (ph.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i)?.[1] || '').trim().toLowerCase();
+      let   pb2 = part.slice(pb).replace(/^\r?\n\r?\n/, '').trimEnd();
+
+      if (pce === 'quoted-printable') pb2 = decodeQP(pb2);
+      else if (pce === 'base64')      pb2 = Buffer.from(pb2.replace(/\s+/g, ''), 'base64').toString('utf8');
+
+      if (pct === 'text/plain') {
+        if (!plain) plain = pb2;
+      } else if (pct === 'text/html') {
+        if (!html) html = pb2;
+      } else if (pct.startsWith('multipart/')) {
+        const subBoundaryMatch = ph.match(/boundary="?([^"\s;]+)"?/i);
+        if (subBoundaryMatch) {
+          const sub = parseMultipart(pb2, subBoundaryMatch[1]);
+          if (sub.html && !html) html = sub.html;
+          if (sub.plain && !plain) plain = sub.plain;
+        }
+      }
+    }
+    return { html, plain };
+  }
+
   // ── If this looks like a full RFC822 message, split headers from body ──
   const isFullMessage = /^(Return-Path|Received|MIME-Version|Content-Type|From|Date|Message-Id):/im.test(raw.slice(0, 3000));
   let headerSection = '';
@@ -144,24 +178,9 @@ function extractCleanBody(raw: string): { html: string, text: string } {
 
   // ── Multipart ──
   if (topCt.startsWith('multipart/') && boundaryMatch) {
-    const boundary = boundaryMatch[1];
-    const escaped  = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts    = bodySection.split(new RegExp(`--${escaped}(?:--)?`));
-
-    for (const part of parts) {
-      const pb = part.search(/\r?\n\r?\n/);
-      if (pb < 0) continue;
-      const ph  = unfoldHeader(part.slice(0, pb));
-      const pct = (ph.match(/Content-Type:\s*([^;\r\n]+)/i)?.[1] || '').trim().toLowerCase();
-      const pce = (ph.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i)?.[1] || '').trim().toLowerCase();
-      let   pb2 = part.slice(pb).replace(/^\r?\n\r?\n/, '').trimEnd();
-
-      if (pce === 'quoted-printable') pb2 = decodeQP(pb2);
-      else if (pce === 'base64')      pb2 = Buffer.from(pb2.replace(/\s+/g, ''), 'base64').toString('utf8');
-
-      if (pct === 'text/plain' && !plainText) plainText = pb2;
-      if (pct === 'text/html'  && !htmlText)  htmlText  = pb2;
-    }
+    const parsed = parseMultipart(bodySection, boundaryMatch[1]);
+    htmlText = parsed.html;
+    plainText = parsed.plain;
   } else {
     // ── Single-part ──
     let text = bodySection;
@@ -466,25 +485,25 @@ async function fetchEmailBody(account: any, folder: string, uid: number): Promis
     try {
       let raw = '';
 
-      // Step 1: BODY[TEXT] = full body without RFC822 headers (best for multipart)
+      // Step 1: Try full source first (best to extract top-level headers + boundary)
       try {
-        for await (const msg of client.fetch([uid], { bodyParts: ['TEXT'] } as any, { uid: true })) {
-          const part = msg.bodyParts?.get('TEXT');
-          if (part) raw = Buffer.from(part as Uint8Array).toString('utf8');
+        for await (const msg of client.fetch([uid], { source: true } as any, { uid: true })) {
+          const src = (msg as any).source;
+          if (src) raw = Buffer.isBuffer(src) ? src.toString('utf8') : Buffer.from(src).toString('utf8');
         }
       } catch { /* ignore, try fallback */ }
 
-      // Step 2: Try full source if TEXT was empty
+      // Step 2: Fallback to BODY[TEXT] if source was empty/failed
       if (!raw || !raw.trim()) {
         try {
-          for await (const msg of client.fetch([uid], { source: true } as any, { uid: true })) {
-            const src = (msg as any).source;
-            if (src) raw = Buffer.isBuffer(src) ? src.toString('utf8') : Buffer.from(src).toString('utf8');
+          for await (const msg of client.fetch([uid], { bodyParts: ['TEXT'] } as any, { uid: true })) {
+            const part = msg.bodyParts?.get('TEXT');
+            if (part) raw = Buffer.from(part as Uint8Array).toString('utf8');
           }
         } catch { /* ignore */ }
       }
 
-      // Step 3: Try individual numbered parts
+      // Step 3: Fallback to individual numbered parts
       if (!raw || !raw.trim()) {
         try {
           for await (const msg of client.fetch([uid], { bodyParts: ['1', '1.1', '2', 'text', '1.2'] } as any, { uid: true })) {
@@ -531,6 +550,13 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   const folderParam = ((req.query.folder as string) || 'inbox').toLowerCase();
   const force       = req.query.force === 'true';
   const accounts    = db.prepare('SELECT * FROM email_accounts WHERE user_id=?').all(req.userId) as any[];
+
+  // Clean up stale cached emails belonging to deleted or non-existent accounts for this user
+  db.prepare(`
+    DELETE FROM inbox_cache 
+    WHERE user_id = ? 
+      AND account_id NOT IN (SELECT id FROM email_accounts WHERE user_id = ?)
+  `).run(req.userId, req.userId);
 
   const imapFolderMap: Record<string, string> = {
     inbox: 'INBOX', spam: 'Spam', sent: 'Sent', starred: 'INBOX',

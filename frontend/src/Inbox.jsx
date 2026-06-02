@@ -322,7 +322,12 @@ export default function Inbox({ userId }) {
           setCache(f, { emails: merged, accounts: res.accounts?.length ? res.accounts : (getCached(f)?.accounts || []), newestDate: newest, syncedAt: now });
           return merged;
         });
-        showToast(`✅ ${newEmails.length} new email${newEmails.length > 1 ? 's' : ''} arrived`);
+
+        // Only show toast notification if new unread emails arrived
+        const unreadFresh = newEmails.filter(e => e.unread);
+        if (unreadFresh.length > 0) {
+          showToast(`✅ ${unreadFresh.length} new unread email${unreadFresh.length > 1 ? 's' : ''} arrived`);
+        }
       }
       setLastSyncedAt(now);
     }
@@ -403,7 +408,13 @@ export default function Inbox({ userId }) {
           const existingIds = new Set(prev.map(e => e.id));
           const fresh = (res.emails || []).filter(e => !existingIds.has(e.id));
           if (fresh.length === 0) return prev;
-          showToast(`✅ ${fresh.length} new email${fresh.length > 1 ? 's' : ''} arrived`);
+
+          // Only alert when unread emails arrive
+          const unreadFresh = fresh.filter(e => e.unread);
+          if (unreadFresh.length > 0) {
+            showToast(`✅ ${unreadFresh.length} new unread email${unreadFresh.length > 1 ? 's' : ''} arrived`);
+          }
+
           const merged = [...fresh, ...prev];
           const newest = merged[0]?.dateRaw || null;
           setNewestEmailDate(newest);

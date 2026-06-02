@@ -143,6 +143,10 @@ function AppInner() {
         if (!res || res.error) return;
         const emails = res.emails || [];
         const unread = emails.filter(e => e.unread);
+        
+        // Update sidebar unread badge with exact count from database cache
+        setInboxUnread(unread.length);
+
         // First run: just record current IDs, no popup
         if (knownIdsRef.current === null) {
           knownIdsRef.current = new Set(emails.map(e => e.id));
@@ -157,8 +161,6 @@ function AppInner() {
           if (tabRef.current !== 'inbox') {
             const senders = [...new Set(fresh.map(e => e.name || e.email))].slice(0, 3);
             setNewEmailPopup({ count: fresh.length, senders });
-            // Update sidebar badge
-            setInboxUnread(prev => prev + fresh.length);
           }
         }
       } catch { /* ignore network errors */ }
