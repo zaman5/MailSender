@@ -347,6 +347,33 @@ try {
   console.error('[DB] Error cleaning up malformed subjects:', e);
 }
 
+// ── Migration: add warmup_settings_json column to email_accounts ──────────────────────
+try {
+  db.prepare(`ALTER TABLE email_accounts ADD COLUMN warmup_settings_json TEXT DEFAULT NULL`).run();
+  console.log('[DB] email_accounts: added column warmup_settings_json');
+} catch (_) { /* already exists */ }
+
+// ── Migration: create warmup_logs table ───────────────────────────────────────────────
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS warmup_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_account_id INTEGER NOT NULL,
+      recipient_email TEXT NOT NULL,
+      subject TEXT DEFAULT '',
+      status TEXT DEFAULT 'sent', -- 'sent', 'landed_inbox', 'saved_from_spam', 'replied'
+      folder_found TEXT DEFAULT 'INBOX', -- 'INBOX' or 'Spam'/'Junk'
+      date_sent DATE DEFAULT (date('now')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (sender_account_id) REFERENCES email_accounts(id) ON DELETE CASCADE
+    );
+  `);
+  console.log('[DB] Created warmup_logs table');
+} catch (e) {
+  console.error('[DB] Error creating warmup_logs table:', e);
+}
+
+
 
 // Seed admin account
 const adminEmail = process.env.ADMIN_EMAIL || 'admin@mailsender.com';

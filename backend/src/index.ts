@@ -13,6 +13,7 @@ import leadsRoutes    from './routes/leads';
 import inboxRoutes    from './routes/inbox';
 import sendRoutes     from './routes/send';
 import dashboardRoutes from './routes/dashboard';
+import warmupRoutes    from './routes/warmup';
 
 import { startCronService } from './cron';
 
@@ -35,6 +36,8 @@ app.use('/api/leads',     leadsRoutes);
 app.use('/api/inbox',     inboxRoutes);
 app.use('/api/send',      sendRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/warmup',    warmupRoutes);
+
 
 app.listen(port, () => {
   console.log(`MailSender API running on port ${port}`);
