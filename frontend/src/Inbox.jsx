@@ -474,12 +474,13 @@ export default function Inbox({ userId }) {
           .then(res => {
             if (res && !res.error) {
               const body = (res.body || '').trim();
+              const subject = res.subject;
               // Only cache if body has real content
               if (body) bodyCache.set(email.id, body);
-              setEmails(prev => prev.map(e => e.id === email.id ? { ...e, body: body || null } : e));
-              setThreadEmails(prev => prev.map(e => e.id === email.id ? { ...e, body: body || null, bodyLoading: false } : e));
+              setEmails(prev => prev.map(e => e.id === email.id ? { ...e, body: body || null, ...(subject ? { subject } : {}) } : e));
+              setThreadEmails(prev => prev.map(e => e.id === email.id ? { ...e, body: body || null, bodyLoading: false, ...(subject ? { subject } : {}) } : e));
               if (email.id === latest.id)
-                setActive(prev => prev?.id === email.id ? { ...prev, body: body || null, bodyLoading: false } : prev);
+                setActive(prev => prev?.id === email.id ? { ...prev, body: body || null, bodyLoading: false, ...(subject ? { subject } : {}) } : prev);
             } else {
               setThreadEmails(prev => prev.map(e => e.id === email.id ? { ...e, bodyLoading: false } : e));
               if (email.id === latest.id)

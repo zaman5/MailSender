@@ -241,6 +241,22 @@ function removeQuotedThread(text: string): string {
   return result.join('\n').trim().replace(/\n{3,}/g, '\n\n');
 }
 
+/** Sanitize subjects containing raw HTML elements or declarations */
+function sanitizeSubject(subject: string, preview?: string): string {
+  if (!subject) return '(no subject)';
+  const s = subject.trim();
+  // Check if subject starts with or contains raw HTML markers/tags
+  if (/^(<!DOCTYPE|<html|<div|<body|<p|<head|<title)/i.test(s) || s.includes('<html') || s.includes('<!DOCTYPE')) {
+    if (preview && preview.trim()) {
+      const cleanPrev = preview.replace(/\s+/g, ' ').trim();
+      const words = cleanPrev.split(' ').slice(0, 10).join(' ');
+      return words ? words + (cleanPrev.split(' ').length > 10 ? '...' : '') : '(no subject)';
+    }
+    return '(no subject)';
+  }
+  return s;
+}
+
 // ─── SQLite-backed persistent inbox cache ────────────────────────────────────
 
 function upsertEmail(email: any, userId: number) {
@@ -255,7 +271,7 @@ function upsertEmail(email: any, userId: number) {
       unread=excluded.unread, starred=excluded.starred, synced_at=excluded.synced_at
   `).run(
     rowId, userId, email.accountId, email.account, email.folder, email.uid,
-    email.name, email.email, email.subject, email.preview || '',
+    email.name, email.email, sanitizeSubject(email.subject, email.preview), email.preview || '',
     email.body ?? null, email.dateRaw,
     email.unread ? 1 : 0, email.starred ? 1 : 0, email.spam ? 1 : 0,
     Date.now()
@@ -445,7 +461,7 @@ async function fetchFolderEmails(account: any, folder: string, limit = 25, since
           accountName: [account.first_name, account.last_name].filter(Boolean).join(' ') || account.email,
           name:        senderName,
           email:       senderEmail,
-          subject:     env?.subject || '(no subject)',
+          subject:     sanitizeSubject(env?.subject || '(no subject)'),
           preview:     '',      // loaded on-demand when email is opened
           body:        null,    // loaded on-demand
           dateRaw:     dateVal.toISOString(),
@@ -600,17 +616,26 @@ router.get('/message/:accountId/:uid', requireAuth, async (req: AuthRequest, res
   const account = db.prepare('SELECT * FROM email_accounts WHERE id=? AND user_id=?').get(accountId, req.userId) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
   // Serve cached body instantly ONLY if it is non-empty (empty = parsing failed before)
-  const row = db.prepare('SELECT body, preview FROM inbox_cache WHERE account_id=? AND uid=? AND user_id=?').get(accountId, uidNum, req.userId) as any;
-  if (row?.body && row.body.trim().length > 0) return res.json({ body: row.body, preview: row.preview || '' });
+  const row = db.prepare('SELECT body, preview, subject FROM inbox_cache WHERE account_id=? AND uid=? AND user_id=?').get(accountId, uidNum, req.userId) as any;
+  if (row?.body && row.body.trim().length > 0) {
+    const cleanSubject = sanitizeSubject(row.subject || '', row.preview || '');
+    if (cleanSubject !== row.subject) {
+      db.prepare('UPDATE inbox_cache SET subject=? WHERE account_id=? AND uid=? AND user_id=?')
+        .run(cleanSubject, accountId, uidNum, req.userId);
+    }
+    return res.json({ body: row.body, preview: row.preview || '', subject: cleanSubject });
+  }
   try {
     const { body, preview } = await fetchEmailBody(account, folder, uidNum);
     // Always persist (even empty) so next fetch knows to re-try via the improved parser
-    db.prepare('UPDATE inbox_cache SET body=?, preview=? WHERE account_id=? AND uid=? AND user_id=?').run(body || null, preview || '', accountId, uidNum, req.userId);
-    res.json({ body: body || '', preview: preview || '' });
+    const dbSubject = row?.subject || '';
+    const cleanSubject = sanitizeSubject(dbSubject, preview);
+    db.prepare('UPDATE inbox_cache SET body=?, preview=?, subject=? WHERE account_id=? AND uid=? AND user_id=?')
+      .run(body || null, preview || '', cleanSubject, accountId, uidNum, req.userId);
+    res.json({ body: body || '', preview: preview || '', subject: cleanSubject });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to fetch message' });
   }
-
 });
 
 

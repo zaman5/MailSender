@@ -335,6 +335,19 @@ for (const col of trackCols) {
   db.prepare(`UPDATE campaigns SET ${col}=0 WHERE ${col} IS NULL`).run();
 });
 
+// ── Cleanup: sanitize malformed subjects containing HTML doctype/tags in inbox_cache ──
+try {
+  db.prepare(`
+    UPDATE inbox_cache 
+    SET subject = '(no subject)' 
+    WHERE subject LIKE '%<!DOCTYPE%' OR subject LIKE '%<html%' OR subject LIKE '%<div%' OR subject LIKE '%<body%'
+  `).run();
+  console.log('[DB] Cleaned up malformed subjects containing HTML elements in inbox_cache.');
+} catch (e) {
+  console.error('[DB] Error cleaning up malformed subjects:', e);
+}
+
+
 // Seed admin account
 const adminEmail = process.env.ADMIN_EMAIL || 'admin@mailsender.com';
 const adminPass  = process.env.ADMIN_PASSWORD || 'Admin@1234';
