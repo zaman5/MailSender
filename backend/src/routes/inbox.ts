@@ -106,9 +106,9 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Extract clean text/plain from a raw MIME body (handles full RFC822 source + multipart + encodings) */
-function extractCleanBody(raw: string): string {
-  if (!raw || !raw.trim()) return '';
+/** Extract HTML and clean text from a raw MIME body (handles RFC822 source + multipart + encodings) */
+function extractCleanBody(raw: string): { html: string, text: string } {
+  if (!raw || !raw.trim()) return { html: '', text: '' };
 
   // ── If this looks like a full RFC822 message, split headers from body ──
   const isFullMessage = /^(Return-Path|Received|MIME-Version|Content-Type|From|Date|Message-Id):/im.test(raw.slice(0, 3000));
@@ -139,14 +139,14 @@ function extractCleanBody(raw: string): string {
   const topCte   = (cteMatch?.[1] || '').trim().toLowerCase();
   const boundaryMatch = unfolded.match(/boundary="?([^"\s;]+)"?/i);
 
+  let htmlText = '';
+  let plainText = '';
+
   // ── Multipart ──
   if (topCt.startsWith('multipart/') && boundaryMatch) {
     const boundary = boundaryMatch[1];
     const escaped  = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const parts    = bodySection.split(new RegExp(`--${escaped}(?:--)?`));
-
-    let plainText = '';
-    let htmlText  = '';
 
     for (const part of parts) {
       const pb = part.search(/\r?\n\r?\n/);
@@ -162,23 +162,39 @@ function extractCleanBody(raw: string): string {
       if (pct === 'text/plain' && !plainText) plainText = pb2;
       if (pct === 'text/html'  && !htmlText)  htmlText  = pb2;
     }
+  } else {
+    // ── Single-part ──
+    let text = bodySection;
+    if (topCte === 'quoted-printable' || (!topCte && /=[0-9A-Fa-f]{2}/.test(text))) {
+      text = decodeQP(text);
+    } else if (topCte === 'base64') {
+      text = Buffer.from(text.replace(/\s+/g, ''), 'base64').toString('utf8');
+    }
 
-    if (plainText) return removeQuotedThread(plainText.trim());
-    if (htmlText)  return removeQuotedThread(stripHtml(htmlText));
-    return '';
+    if (topCt === 'text/html' || /\<[a-zA-Z]/.test(text)) {
+      htmlText = text;
+    } else {
+      plainText = text;
+    }
   }
 
-  // ── Single-part ──
-  let text = bodySection;
-  if (topCte === 'quoted-printable' || (!topCte && /=[0-9A-Fa-f]{2}/.test(text))) {
-    text = decodeQP(text);
-  } else if (topCte === 'base64') {
-    text = Buffer.from(text.replace(/\s+/g, ''), 'base64').toString('utf8');
+  let finalHtml = '';
+  let finalFieldText = '';
+
+  if (htmlText) {
+    finalHtml = htmlText;
+    finalFieldText = stripHtml(htmlText);
+  } else if (plainText) {
+    finalHtml = `<div>${plainText.replace(/\r?\n/g, '<br>')}</div>`;
+    finalFieldText = plainText;
   }
 
-  if (topCt === 'text/html' || /\<[a-zA-Z]/.test(text)) text = stripHtml(text);
+  const cleanPreview = removeQuotedThread(finalFieldText);
 
-  return removeQuotedThread(text.trim());
+  return {
+    html: finalHtml.trim(),
+    text: cleanPreview.trim()
+  };
 }
 
 /** Remove quoted reply thread — keep only the newest message */
@@ -439,10 +455,11 @@ async function fetchFolderEmails(account: any, folder: string, limit = 25, since
 }
 
 // ─── Fetch body of a single email on-demand ───────────────────────────────────
-async function fetchEmailBody(account: any, folder: string, uid: number): Promise<string> {
+async function fetchEmailBody(account: any, folder: string, uid: number): Promise<{ body: string, preview: string }> {
   const config = getImapConfig(account);
   const client = new ImapFlow({ ...config, logger: false } as any);
   let body = '';
+  let preview = '';
   try {
     await client.connect();
     const lock = await client.getMailboxLock(folder);
@@ -479,14 +496,18 @@ async function fetchEmailBody(account: any, folder: string, uid: number): Promis
         } catch { /* ignore */ }
       }
 
-      if (raw && raw.trim()) body = extractCleanBody(raw);
+      if (raw && raw.trim()) {
+        const parsed = extractCleanBody(raw);
+        body = parsed.html;
+        preview = parsed.text;
+      }
     } finally { lock.release(); }
   } catch (err) {
     console.error('[inbox] fetchEmailBody error:', err instanceof Error ? err.message : err);
   } finally {
     try { await client.logout(); } catch { /* ignore */ }
   }
-  return body;
+  return { body, preview };
 }
 
 
@@ -553,13 +574,13 @@ router.get('/message/:accountId/:uid', requireAuth, async (req: AuthRequest, res
   const account = db.prepare('SELECT * FROM email_accounts WHERE id=? AND user_id=?').get(accountId, req.userId) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
   // Serve cached body instantly ONLY if it is non-empty (empty = parsing failed before)
-  const row = db.prepare('SELECT body FROM inbox_cache WHERE account_id=? AND uid=? AND user_id=?').get(accountId, uidNum, req.userId) as any;
-  if (row?.body && row.body.trim().length > 0) return res.json({ body: row.body });
+  const row = db.prepare('SELECT body, preview FROM inbox_cache WHERE account_id=? AND uid=? AND user_id=?').get(accountId, uidNum, req.userId) as any;
+  if (row?.body && row.body.trim().length > 0) return res.json({ body: row.body, preview: row.preview || '' });
   try {
-    const body = await fetchEmailBody(account, folder, uidNum);
+    const { body, preview } = await fetchEmailBody(account, folder, uidNum);
     // Always persist (even empty) so next fetch knows to re-try via the improved parser
-    db.prepare('UPDATE inbox_cache SET body=? WHERE account_id=? AND uid=? AND user_id=?').run(body || null, accountId, uidNum, req.userId);
-    res.json({ body: body || '' });
+    db.prepare('UPDATE inbox_cache SET body=?, preview=? WHERE account_id=? AND uid=? AND user_id=?').run(body || null, preview || '', accountId, uidNum, req.userId);
+    res.json({ body: body || '', preview: preview || '' });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to fetch message' });
   }
@@ -632,7 +653,8 @@ router.post('/reply', requireAuth, async (req: AuthRequest, res: Response) => {
       from:    account.email,
       to:      toEmail,
       subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-      text:    body,
+      html:    body,
+      text:    stripHtml(body),
     });
     res.json({ success: true });
   } catch (err) {
@@ -665,7 +687,8 @@ router.post('/send', requireAuth, async (req: AuthRequest, res: Response) => {
       from:    account.email,
       to:      toEmail,
       subject: subject,
-      text:    body,
+      html:    body,
+      text:    stripHtml(body),
     });
     res.json({ success: true });
   } catch (err) {

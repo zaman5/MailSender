@@ -785,3 +785,12 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
 .download-apk-btn:active {
   transform: translateY(0);
 }
+
+/* ==================== RICH EDITOR CONTENT ==================== */
+.rich-editor-content[contenteditable]:empty:before {
+  content: attr(placeholder);
+  color: var(--text-muted);
+  opacity: 0.6;
+  pointer-events: none;
+  display: block;
+}

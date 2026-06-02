@@ -55,6 +55,171 @@ function normalizeSubject(s = '') {
   return s.replace(/^(Re:|RE:|Fwd:|FW:|Fw:)\s*/gi, '').trim().toLowerCase();
 }
 
+function isHtmlEmpty(html) {
+  if (!html) return true;
+  const clean = html.replace(/<[^>]*>/g, '').trim();
+  return clean.length === 0;
+}
+
+const ToolbarButton = ({ onClick, children, title }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={title}
+      style={{
+        background: hovered ? 'rgba(255, 255, 255, 0.08)' : 'none',
+        border: 'none',
+        color: hovered ? 'var(--accent-primary)' : 'var(--text-secondary)',
+        cursor: 'pointer',
+        padding: '5px 8px',
+        borderRadius: 4,
+        fontWeight: 'bold',
+        fontSize: '0.82rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.15s'
+      }}
+    >
+      {children}
+    </button>
+  );
+};
+
+function RichEditor({ value, onChange, placeholder, style }) {
+  const editorRef = useRef(null);
+
+  // Sync value from prop to editor (only if value differs from innerHTML to avoid resetting cursor)
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || '';
+    }
+  }, [value]);
+
+  const exec = (command, arg = null) => {
+    document.execCommand(command, false, arg);
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleLink = () => {
+    const url = prompt('Enter link URL (e.g., https://google.com):');
+    if (url) exec('createLink', url);
+  };
+
+  const handleImage = () => {
+    const url = prompt('Enter image URL (e.g., https://example.com/pic.png):');
+    if (url) exec('insertImage', url);
+  };
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      border: '1px solid var(--border-color)',
+      borderRadius: 8,
+      overflow: 'hidden',
+      background: 'rgba(255, 255, 255, 0.02)',
+      ...style
+    }}>
+      {/* Toolbar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.2rem',
+        padding: '6px 10px',
+        borderBottom: '1px solid var(--border-color)',
+        background: 'rgba(255, 255, 255, 0.03)',
+        flexWrap: 'wrap'
+      }}>
+        <ToolbarButton onClick={() => exec('bold')} title="Bold"><b>B</b></ToolbarButton>
+        <ToolbarButton onClick={() => exec('italic')} title="Italic"><i>I</i></ToolbarButton>
+        <ToolbarButton onClick={() => exec('underline')} title="Underline"><u>U</u></ToolbarButton>
+        <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 4px' }} />
+        <ToolbarButton onClick={handleLink} title="Insert Link">🔗</ToolbarButton>
+        <ToolbarButton onClick={handleImage} title="Insert Image">🖼️</ToolbarButton>
+        <ToolbarButton onClick={() => exec('removeFormat')} title="Clear Formatting">🧹</ToolbarButton>
+      </div>
+
+      {/* Editor Content */}
+      <div
+        ref={editorRef}
+        contentEditable
+        onInput={handleInput}
+        className="rich-editor-content"
+        placeholder={placeholder}
+        style={{
+          flex: 1,
+          minHeight: 120,
+          outline: 'none',
+          padding: '10px 14px',
+          color: 'var(--text-primary)',
+          fontSize: '0.9rem',
+          lineHeight: 1.6,
+          overflowY: 'auto',
+          wordBreak: 'break-word',
+          background: 'none'
+        }}
+      />
+    </div>
+  );
+}
+
+const AutoHeightIframe = ({ html }) => {
+  const iframeRef = useRef(null);
+
+  const handleLoad = () => {
+    const iframe = iframeRef.current;
+    if (iframe && iframe.contentWindow) {
+      try {
+        // Wait briefly for images/layouts inside iframe to calculate
+        setTimeout(() => {
+          const body = iframe.contentWindow.document.body;
+          if (body) {
+            iframe.style.height = `${body.scrollHeight + 25}px`;
+          }
+        }, 100);
+      } catch (e) {
+        // Handle cross-origin access security
+      }
+    }
+  };
+
+  useEffect(() => {
+    handleLoad();
+  }, [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      srcDoc={html}
+      onLoad={handleLoad}
+      sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+      style={{
+        width: '100%',
+        minHeight: '220px',
+        border: 'none',
+        borderRadius: 8,
+        background: '#fff',
+        transition: 'height 0.2s ease',
+        display: 'block'
+      }}
+      title="Email Body"
+    />
+  );
+};
+
 export default function Inbox({ userId }) {
   const [folder, setFolder]       = useState('inbox');
   const [emails, setEmails]       = useState([]);
@@ -406,10 +571,10 @@ export default function Inbox({ userId }) {
         && (filterAcc === 'all' || e.account === filterAcc);
   });
 
-  // Group into threads by normalised subject only (cross-account conversations merge)
+  // Group into threads by normalised subject and receiving accountId (cross-account conversations separate)
   const threadMap = new Map();
   for (const e of displayed) {
-    const key = normalizeSubject(e.subject);
+    const key = `${normalizeSubject(e.subject)}-${e.accountId}`;
     if (!threadMap.has(key)) threadMap.set(key, []);
     // Within thread, skip duplicate uid+accountId
     const existing = threadMap.get(key);
@@ -419,7 +584,13 @@ export default function Inbox({ userId }) {
   const threadList = [...threadMap.values()]
     .map(msgs => {
       const byDate = [...msgs].sort((a, b) => new Date(b.dateRaw) - new Date(a.dateRaw));
-      return { key: normalizeSubject(byDate[0].subject), latest: byDate[0], all: byDate, count: byDate.length, hasUnread: byDate.some(e => e.unread) };
+      return {
+        key: `${normalizeSubject(byDate[0].subject)}-${byDate[0].accountId}`,
+        latest: byDate[0],
+        all: byDate,
+        count: byDate.length,
+        hasUnread: byDate.some(e => e.unread)
+      };
     })
     .sort((a, b) => new Date(b.latest.dateRaw) - new Date(a.latest.dateRaw));
 
@@ -744,8 +915,14 @@ export default function Inbox({ userId }) {
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', padding: '1rem 0' }}>Loading…</div>
                       ) : (
                         <>
-                          <div style={{ fontSize: '0.875rem', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)', marginBottom: quotedText ? '0.75rem' : 0 }}>
-                            {mainText || '(Empty)'}
+                          <div style={{ marginBottom: quotedText ? '0.75rem' : 0 }}>
+                            {msg.body ? (
+                              <AutoHeightIframe html={msg.body} />
+                            ) : (
+                              <div style={{ fontSize: '0.875rem', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)' }}>
+                                {mainText || '(Empty)'}
+                              </div>
+                            )}
                           </div>
                           {quotedText && (
                             <div>
@@ -762,7 +939,10 @@ export default function Inbox({ userId }) {
                         <div key={i} style={{ display: 'flex', gap: '0.5rem', flexDirection: 'row-reverse', marginTop: '0.75rem' }}>
                           <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.55rem', color: '#fff', flexShrink: 0 }}>ME</div>
                           <div style={{ maxWidth: '72%' }}>
-                            <div style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: '10px 2px 10px 10px', padding: '0.55rem 0.85rem', fontSize: '0.84rem', lineHeight: 1.65 }}>{r.body}</div>
+                            <div 
+                              style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: '10px 2px 10px 10px', padding: '0.55rem 0.85rem', fontSize: '0.84rem', lineHeight: 1.65 }}
+                              dangerouslySetInnerHTML={{ __html: r.body }}
+                            />
                             <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginTop: '0.2rem', textAlign: 'right' }}>Sent · {r.time}</div>
                           </div>
                         </div>
@@ -798,19 +978,16 @@ export default function Inbox({ userId }) {
                     <span>From: <strong style={{ color: 'var(--text-secondary)' }}>{active.account}</strong></span>
                     <span>To: <strong style={{ color: 'var(--text-secondary)' }}>{active.email}</strong></span>
                   </div>
-                  <textarea
-                    autoFocus
-                    value={replyText}
-                    onChange={e => setReplyText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendReply())}
+                  <RichEditor
                     placeholder={`Reply to ${active.name || active.email}…`}
-                    rows={4}
-                    style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: '0.75rem 1rem', color: 'var(--text-primary)', fontSize: '0.875rem', resize: 'none', lineHeight: 1.65, boxSizing: 'border-box' }}
+                    value={replyText}
+                    onChange={setReplyText}
+                    style={{ border: 'none', borderRadius: 0 }}
                   />
                   <div style={{ padding: '0.5rem 1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => { setShowReply(false); setReplyText(''); }}>Discard</button>
 
-                    <button className="btn btn-primary btn-sm" onClick={sendReply} disabled={!replyText.trim() || sending}>
+                    <button className="btn btn-primary btn-sm" onClick={sendReply} disabled={isHtmlEmpty(replyText) || sending}>
                       {sending ? 'Sending…' : '↑ Send Reply'}
                     </button>
                   </div>
@@ -869,12 +1046,11 @@ export default function Inbox({ userId }) {
                 />
               </div>
 
-              <textarea 
-                placeholder="Write your message here..." 
-                rows={12}
-                style={{ width: '100%', border: 'none', background: 'transparent', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontSize: '0.9rem', lineHeight: 1.6, marginTop: '0.5rem' }}
+              <RichEditor
+                placeholder="Write your message here..."
                 value={composeForm.body}
-                onChange={e => setComposeForm(p => ({ ...p, body: e.target.value }))}
+                onChange={val => setComposeForm(p => ({ ...p, body: val }))}
+                style={{ marginTop: '0.5rem', minHeight: 280 }}
               />
             </div>
 
@@ -883,7 +1059,7 @@ export default function Inbox({ userId }) {
               <button 
                 className="btn btn-primary" 
                 onClick={sendCompose} 
-                disabled={composeSending || !composeForm.accountId || !composeForm.to || !composeForm.body}
+                disabled={composeSending || !composeForm.accountId || !composeForm.to || isHtmlEmpty(composeForm.body)}
               >
                 {composeSending ? 'Sending...' : 'Send Message'}
               </button>
