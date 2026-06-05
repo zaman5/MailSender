@@ -254,11 +254,29 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: friendlyError(msg) });
   }
 
+  const defaultWarmupSettings = {
+    filterTag: 'helpful',
+    includeFilterTag: false,
+    dailyLimit: 20,
+    emailReply: true,
+    activeLimit: 1,
+    dailyIncrement: 1,
+    replyRate: 50,
+    personalizedList: '',
+    businessType: '',
+    universe: '',
+    customContent: '',
+    signature: '',
+    openaiKey: '',
+    warmupMode: 'ai',
+    customTemplates: []
+  };
+
   const result = db.prepare(`
     INSERT INTO email_accounts
       (user_id, first_name, last_name, email, esp,
-       app_password, smtp_host, smtp_port, smtp_user, smtp_pass, imap_host, imap_port)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       app_password, smtp_host, smtp_port, smtp_user, smtp_pass, imap_host, imap_port, warmup_status, warmup_settings_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paused', ?)
   `).run(
     req.userId,
     firstName   || '',
@@ -272,6 +290,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     smtpPass    || '',
     imapHost    || '',
     imapPort    || '993',
+    JSON.stringify(defaultWarmupSettings)
   );
 
   const account = db.prepare('SELECT * FROM email_accounts WHERE id=?').get(result.lastInsertRowid);

@@ -373,6 +373,44 @@ try {
   console.error('[DB] Error creating warmup_logs table:', e);
 }
 
+// ── Cleanup: ensure all email_accounts have warmup_status and warmup_settings_json initialized ──
+try {
+  const defaultWarmupSettings = {
+    filterTag: 'helpful',
+    includeFilterTag: false,
+    dailyLimit: 20,
+    emailReply: true,
+    activeLimit: 1,
+    dailyIncrement: 1,
+    replyRate: 50,
+    personalizedList: '',
+    businessType: '',
+    universe: '',
+    customContent: '',
+    signature: '',
+    openaiKey: '',
+    warmupMode: 'ai',
+    customTemplates: []
+  };
+
+  db.prepare(`
+    UPDATE email_accounts 
+    SET warmup_status = 'paused' 
+    WHERE warmup_status IS NULL OR warmup_status = 'inactive' OR warmup_status = ''
+  `).run();
+
+  db.prepare(`
+    UPDATE email_accounts 
+    SET warmup_settings_json = ? 
+    WHERE warmup_settings_json IS NULL
+  `).run(JSON.stringify(defaultWarmupSettings));
+  
+  console.log('[DB] Seeded default warmup status and settings for all existing email accounts');
+} catch (e) {
+  console.error('[DB] Error seeding default warmup status:', e);
+}
+
+
 
 
 // Seed admin account

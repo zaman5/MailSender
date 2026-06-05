@@ -77,8 +77,49 @@ export default function AccountPanel({ account, accounts, onClose, onNavigate, o
     filterTag: 'helpful', includeFilterTag: false, dailyLimit: 20,
     emailReply: true, activeLimit: 1, dailyIncrement: 1,
     personalizedList: '', businessType: '', universe: '',
-    customContent: '', signature: '', replyRate: 50, openaiKey: ''
+    customContent: '', signature: '', replyRate: 50, openaiKey: '',
+    warmupMode: 'ai', customTemplates: []
   });
+
+  const [newTemplate, setNewTemplate] = useState({ subject: '', body: '' });
+  const [aiPreview, setAiPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+
+  async function generateAiPreview() {
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setAiPreview(null);
+    try {
+      const res = await api.post('/warmup/ai-preview', {
+        businessType: warmupSettings.businessType,
+        customContent: warmupSettings.customContent,
+        openaiKey: warmupSettings.openaiKey
+      });
+      if (res && !res.error) {
+        setAiPreview(res);
+      } else {
+        setPreviewError(res?.error || 'Failed to generate preview');
+      }
+    } catch (err) {
+      setPreviewError('Connection error generating preview');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  function addCustomTemplate() {
+    if (!newTemplate.subject.trim() || !newTemplate.body.trim()) return;
+    const list = [...(warmupSettings.customTemplates || [])];
+    list.push({ subject: newTemplate.subject.trim(), body: newTemplate.body.trim() });
+    setWarmupSettings(p => ({ ...p, customTemplates: list }));
+    setNewTemplate({ subject: '', body: '' });
+  }
+
+  function deleteCustomTemplate(index) {
+    const list = (warmupSettings.customTemplates || []).filter((_, i) => i !== index);
+    setWarmupSettings(p => ({ ...p, customTemplates: list }));
+  }
 
   const [stats, setStats] = useState({
     totalSent: 0,
@@ -99,7 +140,12 @@ export default function AccountPanel({ account, accounts, onClose, onNavigate, o
       // 1. Fetch Warmup Settings
       api.get(`/warmup/settings/${account.id}`).then(res => {
         if (res && res.settings) {
-          setWarmupSettings(res.settings);
+          setWarmupSettings(prev => ({
+            ...prev,
+            ...res.settings,
+            warmupMode: res.settings.warmupMode || 'ai',
+            customTemplates: res.settings.customTemplates || []
+          }));
         }
       });
 
@@ -250,35 +296,136 @@ export default function AccountPanel({ account, accounts, onClose, onNavigate, o
                 <input type="range" min={0} max={100} value={warmupSettings.replyRate} onChange={e => setWarmupSettings(p => ({...p, replyRate: e.target.value}))} style={{ width: '100%', accentColor: 'var(--accent-primary)' }} />
               </div>
 
-              <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '1rem' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Advanced AI Warmup Settings</div>
-                <p className="fs-xs text-secondary" style={{ marginBottom: '1rem' }}>These settings control OpenAI GPT email content generation to maximize domain reputation.</p>
-                
-                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.8rem' }}>Custom OpenAI API Key <span className="fs-xs text-muted">(Optional - leaves default)</span></label>
-                  <input className="form-input" type="password" style={{ fontSize: '0.8rem' }} placeholder="sk-..." value={warmupSettings.openaiKey || ''} onChange={e => setWarmupSettings(p => ({...p, openaiKey: e.target.value}))} />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.8rem' }}>Business Type / Service</label>
-                  <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. outreach automation / web design" value={warmupSettings.businessType || ''} onChange={e => setWarmupSettings(p => ({...p, businessType: e.target.value}))} />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.8rem' }}>Custom AI Topic / Style Prompt</label>
-                  <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. a friendly partnership connect, asking for feedback" value={warmupSettings.customContent || ''} onChange={e => setWarmupSettings(p => ({...p, customContent: e.target.value}))} />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.8rem' }}>Personalized Target Recipients <span className="fs-xs text-muted">(Optional - comma separated list, e.g. test@other.com)</span></label>
-                  <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. test1@gmail.com, test2@outlook.com" value={warmupSettings.personalizedList || ''} onChange={e => setWarmupSettings(p => ({...p, personalizedList: e.target.value}))} />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" style={{ fontSize: '0.8rem' }}>Warmup Custom Email Signature</label>
-                  <textarea className="form-input" style={{ fontSize: '0.8rem', minHeight: 60 }} placeholder="Your warmup email signature tag" value={warmupSettings.signature || ''} onChange={e => setWarmupSettings(p => ({...p, signature: e.target.value}))} />
+              <div className="form-group">
+                <label className="form-label">Warmup Content Mode</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
+                  {[['ai', '🤖 AI Base Warmup'], ['custom', '✍️ Manual Composing']].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => setWarmupSettings(p => ({ ...p, warmupMode: mode }))}
+                      type="button"
+                      style={{
+                        padding: '0.6rem',
+                        borderRadius: 8,
+                        border: `2px solid ${warmupSettings.warmupMode === mode ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                        background: warmupSettings.warmupMode === mode ? 'rgba(99,102,241,0.12)' : 'var(--bg-tertiary)',
+                        color: warmupSettings.warmupMode === mode ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        fontWeight: warmupSettings.warmupMode === mode ? 700 : 400,
+                        fontSize: '0.8rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem'
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
+
+              {warmupSettings.warmupMode === 'ai' ? (
+                <div style={{ background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '1rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Advanced AI Warmup Settings</div>
+                  <p className="fs-xs text-secondary" style={{ marginBottom: '1rem' }}>These settings control OpenAI GPT email content generation to maximize domain reputation.</p>
+                  
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Custom OpenAI API Key <span className="fs-xs text-muted">(Optional - leaves default)</span></label>
+                    <input className="form-input" type="password" style={{ fontSize: '0.8rem' }} placeholder="sk-..." value={warmupSettings.openaiKey || ''} onChange={e => setWarmupSettings(p => ({...p, openaiKey: e.target.value}))} />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Business Type / Service</label>
+                    <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. outreach automation / web design" value={warmupSettings.businessType || ''} onChange={e => setWarmupSettings(p => ({...p, businessType: e.target.value}))} />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Custom AI Topic / Style Prompt</label>
+                    <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. a friendly partnership connect, asking for feedback" value={warmupSettings.customContent || ''} onChange={e => setWarmupSettings(p => ({...p, customContent: e.target.value}))} />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Personalized Target Recipients <span className="fs-xs text-muted">(Optional - comma separated list, e.g. test@other.com)</span></label>
+                    <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. test1@gmail.com, test2@outlook.com" value={warmupSettings.personalizedList || ''} onChange={e => setWarmupSettings(p => ({...p, personalizedList: e.target.value}))} />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Warmup Custom Email Signature</label>
+                    <textarea className="form-input" style={{ fontSize: '0.8rem', minHeight: 60 }} placeholder="Your warmup email signature tag" value={warmupSettings.signature || ''} onChange={e => setWarmupSettings(p => ({...p, signature: e.target.value}))} />
+                  </div>
+
+                  <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={generateAiPreview}
+                      disabled={previewLoading}
+                      type="button"
+                    >
+                      {previewLoading ? 'Generating...' : '✨ Generate AI Sample Email'}
+                    </button>
+                    {aiPreview && (
+                      <div style={{ marginTop: '0.75rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.75rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--accent-primary)', marginBottom: '0.25rem' }}>Subject:</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>{aiPreview.subject}</div>
+                        <div style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--accent-primary)', marginBottom: '0.25rem' }}>Body:</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{aiPreview.body}</div>
+                      </div>
+                    )}
+                    {previewError && (
+                      <div style={{ marginTop: '0.5rem', color: 'var(--danger)', fontSize: '0.75rem' }}>
+                        ⚠ {previewError}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
+                  <div style={{ background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '1rem' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Manual Template Composing</div>
+                    <p className="fs-xs text-secondary" style={{ marginBottom: '1rem' }}>Compose templates that the warmup engine will rotate through when sending emails and replies.</p>
+
+                    <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Template Subject</label>
+                      <input className="form-input" style={{ fontSize: '0.8rem' }} placeholder="e.g. Quick feedback on your app" value={newTemplate.subject} onChange={e => setNewTemplate(p => ({ ...p, subject: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Template Body</label>
+                      <textarea className="form-input" style={{ fontSize: '0.8rem', minHeight: 80 }} placeholder="e.g. Hi,\n\nI was testing out your platform..." value={newTemplate.body} onChange={e => setNewTemplate(p => ({ ...p, body: e.target.value }))} />
+                    </div>
+                    <button className="btn btn-secondary btn-sm" onClick={addCustomTemplate} disabled={!newTemplate.subject.trim() || !newTemplate.body.trim()} type="button">
+                      ➕ Add Template
+                    </button>
+                  </div>
+
+                  <div className="card card-p">
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.75rem' }}>Your Custom Templates ({(warmupSettings.customTemplates || []).length})</div>
+                    {(warmupSettings.customTemplates || []).length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '0.5rem 0' }}>No templates composed. Add one above.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {(warmupSettings.customTemplates || []).map((t, idx) => (
+                          <div key={idx} style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.75rem', background: 'var(--bg-tertiary)', position: 'relative' }}>
+                            <button
+                              onClick={() => deleteCustomTemplate(idx)}
+                              type="button"
+                              style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.8rem' }}
+                            >
+                              🗑 Delete
+                            </button>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem', paddingRight: '3.5rem' }}>
+                              Subject: {t.subject}
+                            </div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+                              {t.body}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button className="btn btn-primary" onClick={saveWarmup}>Save Warmup Settings</button>

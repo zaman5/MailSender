@@ -61,7 +61,7 @@ function makeTransport(account: any): nodemailer.Transporter {
 }
 
 // Low-level OpenAI API fetch wrapper
-async function callOpenAI(apiKey: string, prompt: string, systemMessage = "You are a professional business writer."): Promise<string> {
+export async function callOpenAI(apiKey: string, prompt: string, systemMessage = "You are a professional business writer."): Promise<string> {
   const key = apiKey || process.env.OPENAI_API_KEY || DEFAULT_OPENAI_KEY;
   if (!key) {
     throw new Error("OpenAI API key is not configured.");
@@ -117,7 +117,9 @@ function getWarmupSettings(account: any) {
     universe: '',
     customContent: '',
     signature: '',
-    openaiKey: ''
+    openaiKey: '',
+    warmupMode: 'ai',
+    customTemplates: []
   };
 }
 
@@ -177,40 +179,49 @@ export async function runWarmupSending(): Promise<{ sent: number; logs: string[]
       let body = '';
       const senderName = [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.email.split('@')[0];
 
-      try {
-        const businessType = settings.businessType || 'outreach automation / software services';
-        const customPrompt = settings.customContent || 'a professional networking email';
-        const apiKey = settings.openaiKey || '';
+      const warmupMode = settings.warmupMode || 'ai';
+      const customTemplates = settings.customTemplates || [];
 
-        const systemPrompt = "You are a professional business manager writing an outreach email. Write a natural, highly realistic, friendly email. Return a JSON structure ONLY: {\"subject\": \"...\", \"body\": \"...\"}. Do not use Markdown formatting or code block wrapper block backticks.";
-        const userPrompt = `Write a short, realistic business or networking email from a sender named "${senderName}". The email should relate to "${businessType}" and follow this prompt style: "${customPrompt}". Keep the email short (2-4 sentences).`;
-
-        const rawAi = await callOpenAI(apiKey, userPrompt, systemPrompt);
-        let parsed: any;
-        
-        // Clean JSON formatting from AI if present
-        const jsonStr = rawAi.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+      if (warmupMode === 'custom' && customTemplates.length > 0) {
+        const chosenTemplate = customTemplates[Math.floor(Math.random() * customTemplates.length)];
+        subject = chosenTemplate.subject || "Quick business connect";
+        body = chosenTemplate.body || "Hi,\n\nI wanted to reach out regarding potential collaborations.\n\nThanks,\n" + senderName;
+      } else {
         try {
-          parsed = JSON.parse(jsonStr);
-        } catch {
-          // regex fallback
-          const subjMatch = jsonStr.match(/"subject"\s*:\s*"([^"]+)"/i);
-          const bodyMatch = jsonStr.match(/"body"\s*:\s*"([\s\S]+?)"/i);
-          if (subjMatch && bodyMatch) {
-            parsed = { subject: subjMatch[1], body: bodyMatch[1].replace(/\\n/g, '\n') };
-          } else {
-            throw new Error("Could not parse AI JSON response: " + jsonStr);
-          }
-        }
+          const businessType = settings.businessType || 'outreach automation / software services';
+          const customPrompt = settings.customContent || 'a professional networking email';
+          const apiKey = settings.openaiKey || '';
 
-        subject = parsed.subject || "Quick networking connect";
-        body = parsed.body || "Hi,\n\nI wanted to reach out regarding potential business partnerships.\n\nThanks,\n" + senderName;
-      } catch (aiErr) {
-        logs.push(`AI generation failed for ${sender.email}, using template: ${aiErr instanceof Error ? aiErr.message : String(aiErr)}`);
-        // Fallback Template
-        const t = FALLBACK_TEMPLATES[Math.floor(Math.random() * FALLBACK_TEMPLATES.length)];
-        subject = t.subject;
-        body = t.body.replace("{{sender_name}}", senderName);
+          const systemPrompt = "You are a professional business manager writing an outreach email. Write a natural, highly realistic, friendly email. Return a JSON structure ONLY: {\"subject\": \"...\", \"body\": \"...\"}. Do not use Markdown formatting or code block wrapper block backticks.";
+          const userPrompt = `Write a short, realistic business or networking email from a sender named "${senderName}". The email should relate to "${businessType}" and follow this prompt style: "${customPrompt}". Keep the email short (2-4 sentences).`;
+
+          const rawAi = await callOpenAI(apiKey, userPrompt, systemPrompt);
+          let parsed: any;
+          
+          // Clean JSON formatting from AI if present
+          const jsonStr = rawAi.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+          try {
+            parsed = JSON.parse(jsonStr);
+          } catch {
+            // regex fallback
+            const subjMatch = jsonStr.match(/"subject"\s*:\s*"([^"]+)"/i);
+            const bodyMatch = jsonStr.match(/"body"\s*:\s*"([\s\S]+?)"/i);
+            if (subjMatch && bodyMatch) {
+              parsed = { subject: subjMatch[1], body: bodyMatch[1].replace(/\\n/g, '\n') };
+            } else {
+              throw new Error("Could not parse AI JSON response: " + jsonStr);
+            }
+          }
+
+          subject = parsed.subject || "Quick networking connect";
+          body = parsed.body || "Hi,\n\nI wanted to reach out regarding potential business partnerships.\n\nThanks,\n" + senderName;
+        } catch (aiErr) {
+          logs.push(`AI generation failed for ${sender.email}, using template: ${aiErr instanceof Error ? aiErr.message : String(aiErr)}`);
+          // Fallback Template
+          const t = FALLBACK_TEMPLATES[Math.floor(Math.random() * FALLBACK_TEMPLATES.length)];
+          subject = t.subject;
+          body = t.body.replace("{{sender_name}}", senderName);
+        }
       }
 
       // 4. Append filter tags if enabled
@@ -384,15 +395,23 @@ export async function runWarmupReceiving(): Promise<{ processed: number; logs: s
                 let replyBody = '';
                 const receiverName = [receiver.first_name, receiver.last_name].filter(Boolean).join(' ') || receiver.email.split('@')[0];
 
-                try {
-                  const apiKey = settings.openaiKey || '';
-                  const systemPrompt = "You are a professional assistant replying to a friendly business email. Keep it extremely short (1-2 sentences). Return plain text only.";
-                  const userPrompt = `Write a short, natural business reply to the following email. Keep it highly realistic. Send reply from "${receiverName}".\n\nIncoming email text:\n${rawSource.slice(0, 800)}`;
-                  
-                  replyBody = await callOpenAI(apiKey, userPrompt, systemPrompt);
-                } catch (_) {
-                  // Fallback Reply
-                  replyBody = FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)];
+                const warmupMode = settings.warmupMode || 'ai';
+                const customTemplates = settings.customTemplates || [];
+
+                if (warmupMode === 'custom' && customTemplates.length > 0) {
+                  const chosenTemplate = customTemplates[Math.floor(Math.random() * customTemplates.length)];
+                  replyBody = chosenTemplate.body || "Thanks for your email. I've received your request.";
+                } else {
+                  try {
+                    const apiKey = settings.openaiKey || '';
+                    const systemPrompt = "You are a professional assistant replying to a friendly business email. Keep it extremely short (1-2 sentences). Return plain text only.";
+                    const userPrompt = `Write a short, natural business reply to the following email. Keep it highly realistic. Send reply from "${receiverName}".\n\nIncoming email text:\n${rawSource.slice(0, 800)}`;
+                    
+                    replyBody = await callOpenAI(apiKey, userPrompt, systemPrompt);
+                  } catch (_) {
+                    // Fallback Reply
+                    replyBody = FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)];
+                  }
                 }
 
                 // Add signature to reply if configured

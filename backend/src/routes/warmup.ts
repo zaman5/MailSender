@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import db from '../db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { runWarmupSending, runWarmupReceiving } from '../utils/warmupEngine';
+import { runWarmupSending, runWarmupReceiving, callOpenAI } from '../utils/warmupEngine';
 
 const router = Router();
 
@@ -25,7 +25,9 @@ function getWarmupSettings(account: any) {
     universe: '',
     customContent: '',
     signature: '',
-    openaiKey: ''
+    openaiKey: '',
+    warmupMode: 'ai',
+    customTemplates: []
   };
 }
 
@@ -176,6 +178,107 @@ router.post('/trigger', requireAuth, async (req: AuthRequest, res: Response) => 
       error: err instanceof Error ? err.message : String(err),
       logs
     });
+  }
+});
+
+// ─── POST /api/warmup/ai-preview ─────────────────────────────────────────────
+// Generates a mock AI warmup email preview using the key and prompts
+router.post('/ai-preview', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { businessType, customContent, openaiKey } = req.body;
+  try {
+    const apiKey = openaiKey || process.env.OPENAI_API_KEY || '';
+    if (!apiKey) {
+      return res.status(400).json({ error: "OpenAI API key is not configured. Please input an API key to generate a preview." });
+    }
+
+    const systemPrompt = "You are a professional business manager writing an outreach email. Write a natural, highly realistic, friendly email. Return a JSON structure ONLY: {\"subject\": \"...\", \"body\": \"...\"}. Do not use Markdown formatting or code block wrapper block backticks.";
+    const userPrompt = `Write a short, realistic business or networking email from a sender named "Sarah". The email should relate to "${businessType || 'SaaS services'}" and follow this prompt style: "${customContent || 'a general business introduction'}". Keep the email short (2-3 sentences).`;
+
+    const rawAi = await callOpenAI(apiKey, userPrompt, systemPrompt);
+    let parsed: any;
+    const jsonStr = rawAi.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      const subjMatch = jsonStr.match(/"subject"\s*:\s*"([^"]+)"/i);
+      const bodyMatch = jsonStr.match(/"body"\s*:\s*"([\s\S]+?)"/i);
+      if (subjMatch && bodyMatch) {
+        parsed = { subject: subjMatch[1], body: bodyMatch[1].replace(/\\n/g, '\n') };
+      } else {
+        throw new Error("Could not parse AI response.");
+      }
+    }
+    res.json(parsed);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ─── GET /api/warmup/global-health ───────────────────────────────────────────
+router.get('/global-health', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const accounts = db.prepare("SELECT id, email FROM email_accounts WHERE user_id=?").all(req.userId) as any[];
+    if (accounts.length === 0) {
+      return res.json({
+        score: 100,
+        deliverability: "100.0",
+        changeToday: 0
+      });
+    }
+
+    const accountIds = accounts.map(a => a.id);
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Total counts
+    const sentInbox = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE sender_account_id IN (${accountIds.join(',')}) AND folder_found='INBOX'
+    `).get() as any;
+    
+    const sentSpam = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE sender_account_id IN (${accountIds.join(',')}) AND (folder_found='Spam' OR status='saved_from_spam')
+    `).get() as any;
+
+    const recvInbox = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE recipient_email IN (SELECT email FROM email_accounts WHERE user_id=?) AND folder_found='INBOX'
+    `).get(req.userId) as any;
+
+    const recvSpam = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE recipient_email IN (SELECT email FROM email_accounts WHERE user_id=?) AND (folder_found='Spam' OR status='saved_from_spam')
+    `).get(req.userId) as any;
+
+    const totalInbox = (sentInbox?.count || 0) + (recvInbox?.count || 0);
+    const totalSpam = (sentSpam?.count || 0) + (recvSpam?.count || 0);
+    const total = totalInbox + totalSpam;
+
+    const deliverabilityVal = total > 0 ? (totalInbox / total) * 100 : 100;
+    const score = Math.round(deliverabilityVal);
+    const deliverability = deliverabilityVal.toFixed(1);
+
+    // Today's counts
+    const todayInboxSent = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE sender_account_id IN (${accountIds.join(',')}) AND date_sent=? AND folder_found='INBOX'
+    `).get(todayStr) as any;
+
+    const todayInboxRecv = db.prepare(`
+      SELECT COUNT(*) as count FROM warmup_logs 
+      WHERE recipient_email IN (SELECT email FROM email_accounts WHERE user_id=?) AND date_sent=? AND folder_found='INBOX'
+    `).get(req.userId, todayStr) as any;
+
+    const changeToday = (todayInboxSent?.count || 0) + (todayInboxRecv?.count || 0);
+
+    res.json({
+      score,
+      deliverability,
+      changeToday
+    });
+  } catch (err) {
+    console.error('[global-health] error:', err);
+    res.status(500).json({ error: 'Failed to compute global warmup health' });
   }
 });
 

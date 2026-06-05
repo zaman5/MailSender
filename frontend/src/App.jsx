@@ -124,6 +124,7 @@ function AppInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inboxUnread, setInboxUnread] = useState(0);
   const [newEmailPopup, setNewEmailPopup] = useState(null); // { count, senders }
+  const [warmupHealth, setWarmupHealth] = useState({ score: 100, deliverability: '100.0', changeToday: 0 });
   const notifRef     = useRef(null);
   const knownIdsRef  = useRef(null); // Set of email IDs we've already seen
   const tabRef       = useRef(tab);
@@ -165,8 +166,23 @@ function AppInner() {
         }
       } catch { /* ignore network errors */ }
     }
+    async function pollWarmupHealth() {
+      try {
+        const res = await api.get('/warmup/global-health');
+        if (res && !res.error) {
+          setWarmupHealth(res);
+        }
+      } catch { /* ignore */ }
+    }
     // First poll after 5s, then every 60s
-    const initial = setTimeout(() => { poll(); timer = setInterval(poll, 60_000); }, 5_000);
+    const initial = setTimeout(() => { 
+      poll(); 
+      pollWarmupHealth();
+      timer = setInterval(() => {
+        poll();
+        pollWarmupHealth();
+      }, 60_000); 
+    }, 5_000);
     return () => { clearTimeout(initial); clearInterval(timer); };
   }, [user?.id]); // Re-run when user changes
 
@@ -264,11 +280,18 @@ function AppInner() {
         <div className="sidebar-footer">
           <div className="warmup-widget">
             <div className="warmup-widget-title"><span>🔥</span> Warmup Health</div>
-            <div className="warmup-score">88 / 100</div>
-            <div className="progress-bar"><div className="progress-fill green" style={{ width: '88%' }}></div></div>
+            <div className="warmup-score">{warmupHealth.score} / 100</div>
+            <div className="progress-bar">
+              <div 
+                className={`progress-fill ${warmupHealth.score >= 90 ? 'green' : warmupHealth.score >= 70 ? 'orange' : 'red'}`} 
+                style={{ width: `${warmupHealth.score}%` }} 
+              />
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-              <span className="fs-xs text-secondary">96.2% deliverability</span>
-              <span className="fs-xs" style={{ color: 'var(--success)' }}>↑ +3 today</span>
+              <span className="fs-xs text-secondary">{warmupHealth.deliverability}% deliverability</span>
+              <span className="fs-xs" style={{ color: warmupHealth.changeToday > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                {warmupHealth.changeToday > 0 ? `↑ +${warmupHealth.changeToday} today` : '0 today'}
+              </span>
             </div>
           </div>
         </div>
